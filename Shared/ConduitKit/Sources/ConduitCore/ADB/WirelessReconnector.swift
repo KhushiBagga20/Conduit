@@ -36,6 +36,8 @@ final class WirelessReconnector {
 
     private var failures: [String: Int] = [:]
     private var nextAttempt: [String: Date] = [:]
+    /// The address each phone's last failed attempt used.
+    private var failedTarget: [String: String] = [:]
     private var inFlight: Set<String> = []
     private var restartedADBServer = false
     private var timer: Timer?
@@ -77,9 +79,18 @@ final class WirelessReconnector {
             if transports.contains(where: \.isReady) {
                 failures[phoneID] = nil
                 nextAttempt[phoneID] = nil
+                failedTarget[phoneID] = nil
                 continue
             }
-            guard !inFlight.contains(phoneID), (nextAttempt[phoneID] ?? .distantPast) <= now else { continue }
+            guard !inFlight.contains(phoneID) else { continue }
+
+            // Backoff applies to retrying the same address. MEASURED on a
+            // Galaxy S24 Ultra: unplugging USB restarts Wireless debugging on
+            // a new port a few seconds later, so the first attempt fails on
+            // the old port — and the new one deserves an attempt at once.
+            let target = "\(endpoint.host):\(endpoint.port)"
+            let retryingSameAddress = failedTarget[phoneID] == target
+            guard !retryingSameAddress || (nextAttempt[phoneID] ?? .distantPast) <= now else { continue }
 
             connect(phoneID: phoneID, endpoint: endpoint, stale: transports.map(\.serial))
         }
@@ -120,10 +131,12 @@ final class WirelessReconnector {
                 CoreLog.engine.notice("connected over Wireless debugging")
                 failures[phoneID] = nil
                 nextAttempt[phoneID] = nil
+                failedTarget[phoneID] = nil
                 onConnected(target, phoneID)
             } else {
                 let count = (failures[phoneID] ?? 0) + 1
                 failures[phoneID] = count
+                failedTarget[phoneID] = target
                 nextAttempt[phoneID] = Date().addingTimeInterval(Self.backoff(afterFailures: count))
                 CoreLog.engine.error("Wireless debugging connect failed (\(count)) — \(output.combined.trimmingCharacters(in: .whitespacesAndNewlines))")
                 // The port changes whenever Wireless debugging restarts; the
