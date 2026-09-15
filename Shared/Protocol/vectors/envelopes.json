@@ -1,0 +1,286 @@
+{
+  "specVersion": 1,
+  "valid": [
+    {
+      "name": "command: link.send with title",
+      "json": {
+        "v": 1,
+        "type": "command",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "action": "link.send",
+        "payload": {
+          "url": "https://example.com/a?b=c&d=e",
+          "title": "Example"
+        }
+      }
+    },
+    {
+      "name": "command: no payload",
+      "json": {
+        "v": 1,
+        "type": "command",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "action": "state.sync"
+      }
+    },
+    {
+      "name": "response: success with empty payload",
+      "json": {
+        "v": 1,
+        "type": "response",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "status": "success",
+        "payload": {}
+      }
+    },
+    {
+      "name": "response: failure",
+      "json": {
+        "v": 1,
+        "type": "response",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "status": "failure",
+        "error": {
+          "code": "permission_denied",
+          "message": "Conduit needs permission to show notifications."
+        }
+      }
+    },
+    {
+      "name": "response: failure with a code this build does not know",
+      "json": {
+        "v": 1,
+        "type": "response",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "status": "failure",
+        "error": {
+          "code": "some_future_code",
+          "message": "Something new went wrong."
+        }
+      }
+    },
+    {
+      "name": "event: call.incoming with timestamp",
+      "json": {
+        "v": 1,
+        "type": "event",
+        "event": "call.incoming",
+        "epoch": "0B7C9D2E-6A41-4F0B-8E3C-5D2A1F9B7C60",
+        "seq": 42,
+        "timestamp": 1757912345678,
+        "payload": {
+          "callID": "c-17",
+          "number": "+91XXXXXXXXXX",
+          "name": "Unknown"
+        }
+      }
+    },
+    {
+      "name": "event: no timestamp, no payload",
+      "json": {
+        "v": 1,
+        "type": "event",
+        "event": "device.lock",
+        "epoch": "0B7C9D2E-6A41-4F0B-8E3C-5D2A1F9B7C60",
+        "seq": 1
+      }
+    },
+    {
+      "name": "command: unicode, quotes and control characters in text",
+      "json": {
+        "v": 1,
+        "type": "command",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "action": "clipboard.set",
+        "payload": {
+          "text": "नमस्ते 👋 \"quoted\" \\ back\nnew line\ttab",
+          "sensitive": false
+        }
+      }
+    },
+    {
+      "name": "event: nested payload with every JSON kind",
+      "json": {
+        "v": 1,
+        "type": "event",
+        "event": "device.snapshot",
+        "epoch": "0B7C9D2E-6A41-4F0B-8E3C-5D2A1F9B7C60",
+        "seq": 7,
+        "payload": {
+          "device": {
+            "id": "a3f1c09be27d44d18c5e0b6f9a2d7e31",
+            "name": "Galaxy S24 Ultra",
+            "platform": "android",
+            "osVersion": "16"
+          },
+          "battery": {
+            "level": 82,
+            "charging": true
+          },
+          "network": {
+            "type": "wifi"
+          },
+          "locked": false,
+          "features": {
+            "links": "available",
+            "calls": "requires_permission",
+            "mirroring": "requires_setup",
+            "files": "planned"
+          },
+          "extra": {
+            "ratio": 0.75,
+            "list": [
+              1,
+              "two",
+              null,
+              true
+            ],
+            "empty": []
+          }
+        }
+      }
+    },
+    {
+      "name": "envelope: unknown top-level field is ignored",
+      "json": {
+        "v": 1,
+        "type": "event",
+        "event": "device.lock",
+        "epoch": "0B7C9D2E-6A41-4F0B-8E3C-5D2A1F9B7C60",
+        "seq": 2,
+        "payload": {
+          "locked": true
+        }
+      },
+      "input": {
+        "v": 1,
+        "type": "event",
+        "event": "device.lock",
+        "epoch": "0B7C9D2E-6A41-4F0B-8E3C-5D2A1F9B7C60",
+        "seq": 2,
+        "payload": {
+          "locked": true
+        },
+        "futureField": "ignored"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing v",
+      "json": {
+        "type": "command",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "action": "state.sync"
+      }
+    },
+    {
+      "name": "missing type",
+      "json": {
+        "v": 1,
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "action": "state.sync"
+      }
+    },
+    {
+      "name": "unknown type",
+      "json": {
+        "v": 1,
+        "type": "notification",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14"
+      }
+    },
+    {
+      "name": "command without requestID",
+      "json": {
+        "v": 1,
+        "type": "command",
+        "action": "state.sync"
+      }
+    },
+    {
+      "name": "command without action",
+      "json": {
+        "v": 1,
+        "type": "command",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14"
+      }
+    },
+    {
+      "name": "response without status",
+      "json": {
+        "v": 1,
+        "type": "response",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14"
+      }
+    },
+    {
+      "name": "response with unknown status",
+      "json": {
+        "v": 1,
+        "type": "response",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "status": "maybe"
+      }
+    },
+    {
+      "name": "failure without error",
+      "json": {
+        "v": 1,
+        "type": "response",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "status": "failure"
+      }
+    },
+    {
+      "name": "event without epoch",
+      "json": {
+        "v": 1,
+        "type": "event",
+        "event": "device.lock",
+        "seq": 1
+      }
+    },
+    {
+      "name": "event without seq",
+      "json": {
+        "v": 1,
+        "type": "event",
+        "event": "device.lock",
+        "epoch": "0B7C9D2E-6A41-4F0B-8E3C-5D2A1F9B7C60"
+      }
+    },
+    {
+      "name": "event with seq 0",
+      "json": {
+        "v": 1,
+        "type": "event",
+        "event": "device.lock",
+        "epoch": "0B7C9D2E-6A41-4F0B-8E3C-5D2A1F9B7C60",
+        "seq": 0
+      }
+    },
+    {
+      "name": "payload is not an object",
+      "json": {
+        "v": 1,
+        "type": "command",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "action": "state.sync",
+        "payload": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "v is not an integer",
+      "json": {
+        "v": "1",
+        "type": "command",
+        "requestID": "6E8B2C1A-0F3D-4B8E-9A61-2F5D7C9E0B14",
+        "action": "state.sync"
+      }
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "specVersion": 1,
+  "frames": [
+    {
+      "name": "control handshake: {}",
+      "channel": 0,
+      "type": 0,
+      "payloadHex": "7b7d",
+      "frameHex": "0000000000027b7d"
+    },
+    {
+      "name": "control envelope: empty payload",
+      "channel": 0,
+      "type": 1,
+      "payloadHex": "",
+      "frameHex": "000100000000"
+    },
+    {
+      "name": "input pointer move dx=-3 dy=12",
+      "channel": 1,
+      "type": 0,
+      "payloadHex": "fffd000c",
+      "frameHex": "010000000004fffd000c"
+    },
+    {
+      "name": "input button left down",
+      "channel": 1,
+      "type": 1,
+      "payloadHex": "0001",
+      "frameHex": "0101000000020001"
+    },
+    {
+      "name": "input scroll dx=0 dy=-20",
+      "channel": 1,
+      "type": 2,
+      "payloadHex": "0000ffec",
+      "frameHex": "0102000000040000ffec"
+    },
+    {
+      "name": "input key volume down released",
+      "channel": 1,
+      "type": 3,
+      "payloadHex": "000100",
+      "frameHex": "010300000003000100"
+    },
+    {
+      "name": "haptic vibrate 30 ms amplitude 160",
+      "channel": 3,
+      "type": 0,
+      "payloadHex": "001ea0",
+      "frameHex": "030000000003001ea0"
+    }
+  ],
+  "rejected": [
+    {
+      "name": "unknown channel 9",
+      "hex": "090000000000",
+      "reason": "unknown_channel"
+    },
+    {
+      "name": "unknown type 7 on control",
+      "hex": "000700000000",
+      "reason": "unknown_type"
+    },
+    {
+      "name": "unknown type 9 on input",
+      "hex": "010900000000",
+      "reason": "unknown_type"
+    },
+    {
+      "name": "control payload one byte over 1 MiB",
+      "hex": "000100100001",
+      "reason": "too_large"
+    },
+    {
+      "name": "input payload one byte over 4 MiB",
+      "hex": "010000400001",
+      "reason": "too_large"
+    }
+  ]
+}

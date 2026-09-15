@@ -7,7 +7,8 @@
 #   Scripts/preflight.sh
 #
 # Prints the working-tree status and diff summary, then fails if anything
-# staged or untracked looks like a secret, a signing asset or private data.
+# staged or untracked looks like a secret, a signing asset, private data or
+# the previous product name.
 # It is a guard rail, not a guarantee — always read the diff as well.
 
 set -euo pipefail
@@ -52,5 +53,24 @@ while IFS= read -r file; do
     fi
 done <<< "$candidates"
 
+# The previous product name must not reach Conduit's code, UI or docs.
+while IFS= read -r file; do
+    [ -f "$file" ] || continue
+    case "$file" in Scripts/preflight.sh) continue ;; esac
+    if grep -IqE '\bPUL\b|\bPul\b' "$file" 2>/dev/null; then
+        echo "✗ Previous product name in $file"
+        grep -nIE '\bPUL\b|\bPul\b' "$file" | head -3
+        status=1
+    fi
+done <<< "$candidates"
+
 [ "$status" -eq 0 ] && echo "✓ Nothing secret-shaped found"
+
+echo
+echo "== Generated design tokens"
+if python3 Shared/Design/generate.py --check; then
+    echo "✓ Up to date"
+else
+    status=1
+fi
 exit "$status"
