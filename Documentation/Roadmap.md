@@ -6,7 +6,7 @@ a real phone, and a report of what changed and what is still limited.
 | Phase | Scope | Status |
 |---|---|---|
 | **0 · Inspect and plan** | Existing technology, reuse assessment, architecture | Done |
-| **1 · Foundation** | Workspace, protocol specification, design tokens, ConduitKit, proven media stack, Mac app with menu bar and workspace, Android skeleton | Built; on-phone verification pending |
+| **1 · Foundation** | Workspace, protocol specification, design tokens, ConduitKit, proven media stack, Mac app with menu bar and workspace, Android skeleton | Done — two hands-on checks pending |
 | **2 · Mac workspace** | Full workspace UI, phone screen with all existing mirroring features, fit/fill, fullscreen, always-on-top, screenshot | Planned |
 | **3 · Menu bar** | Connection ownership, quick actions, notifications, launch at login, auto-connect | Planned |
 | **4 · Android** | Pairing, foreground service, home, Macs, features, settings, share target, trackpad | Planned |
@@ -18,14 +18,17 @@ a real phone, and a report of what changed and what is still limited.
 
 | Check | Status |
 |---|---|
-| ConduitKit builds; 34 tests pass (protocol vectors, scrcpy byte layouts, adb parsing, phone grouping) | Done |
+| ConduitKit builds; 35 tests pass (protocol vectors, scrcpy byte layouts, adb parsing, phone grouping) | Done |
 | Android app builds; core runs the same protocol vectors | Done |
 | Mac app builds for macOS 15; interfaces cannot import the owner | Done |
 | Menu bar and workspace layouts checked in light and dark | Done |
-| Mirroring, input, clipboard and audio work through the new stack on a phone | Pending — needs the phone attached |
-| Two scrcpy servers side by side (for a background clipboard session) | Pending — needs the phone |
-| Wireless debugging found through macOS Bonjour and connected | Pending — needs the phone |
-| scrcpy camera source on the test phone | Pending — needs the phone |
+| Mirroring, input, audio socket and screen-off through the new owner, on a Galaxy S24 Ultra | Done — see [Measurements](Measurements.md) |
+| Recovery after the phone-side server dies, and after losing USB mid-session | Done |
+| Two scrcpy servers side by side (for a background clipboard session) | Done |
+| Wireless debugging found through macOS Bonjour and connected automatically | Done |
+| scrcpy camera source on the test phone | Done |
+| Android interface checked on the phone | Pending — the phone was locked |
+| Device → Mac clipboard and audio playback checked by a person | Pending |
 
 ## Known platform limits
 
