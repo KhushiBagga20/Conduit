@@ -1,0 +1,147 @@
+//
+//  ADB.swift
+//  ConduitCore
+//
+//  Runs the user's own adb. Every blocking call is `nonisolated` and must be
+//  made off the main actor.
+//
+
+import ConduitMedia
+import Darwin
+import Foundation
+
+nonisolated struct ADB: Sendable {
+
+    let path: String
+
+    /// The adb the user runs in Terminal, in preference order. Two adb
+    /// binaries of different versions kill each other's server on every call,
+    /// so matching Terminal matters more than picking the newest.
+    static func locate() -> ADB? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let candidates = [
+            "/opt/homebrew/bin/adb",
+            "/usr/local/bin/adb",
+            "\(home)/Library/Android/sdk/platform-tools/adb",
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }.map(ADB.init)
+    }
+
+    struct Output: Sendable {
+        let status: Int32
+        let stdout: String
+        let stderr: String
+        var ok: Bool { status == 0 }
+        var combined: String { stdout + stderr }
+    }
+
+    /// Run adb to completion.
+    ///
+    /// Output is collected with readability handlers rather than
+    /// readDataToEndOfFile(): if this call happens to spawn the adb server,
+    /// the daemon can inherit the pipe and hold it open, and a blocking read
+    /// would never see EOF.
+    @discardableResult
+    func run(_ arguments: [String], timeout: TimeInterval = 20) -> Output {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = arguments
+        process.standardInput = FileHandle.nullDevice
+
+        let outPipe = Pipe(), errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+
+        let buffer = OutputBuffer()
+        outPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil } else { buffer.appendOut(data) }
+        }
+        errPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil } else { buffer.appendErr(data) }
+        }
+
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+
+        do {
+            try process.run()
+        } catch {
+            return Output(status: -1, stdout: "", stderr: error.localizedDescription)
+        }
+
+        if finished.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            _ = finished.wait(timeout: .now() + 2)
+        }
+
+        // Let the last chunk land before detaching the handlers.
+        Thread.sleep(forTimeInterval: 0.03)
+        outPipe.fileHandleForReading.readabilityHandler = nil
+        errPipe.fileHandleForReading.readabilityHandler = nil
+
+        let status = process.isRunning ? -1 : process.terminationStatus
+        return Output(status: status, stdout: buffer.stdout, stderr: buffer.stderr)
+    }
+
+    /// Start the adb server detached from any pipe, so later calls never
+    /// spawn it with a pipe attached.
+    func startServer() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = ["start-server"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
+    }
+
+    // MARK: - Commands
+
+    func properties(of serial: String) -> ADBParsing.PhoneProperties? {
+        let out = run(["-s", serial, "shell", ADBParsing.phonePropertiesCommand], timeout: 10)
+        guard out.ok else { return nil }
+        return ADBParsing.phoneProperties(out.stdout, fallbackSerial: serial)
+    }
+
+    func connect(host: String, port: UInt16) -> Bool {
+        ADBParsing.connectSucceeded(run(["connect", "\(host):\(port)"], timeout: 12).combined)
+    }
+
+    func push(_ local: URL, to remote: String, serial: String) -> Output {
+        run(["-s", serial, "push", local.path, remote], timeout: 60)
+    }
+
+    /// Forward a free local port to an abstract socket on the phone.
+    func forward(serial: String, toAbstractSocket name: String) -> UInt16? {
+        let out = run(["-s", serial, "forward", "tcp:0", "localabstract:\(name)"], timeout: 10)
+        return out.ok ? ADBParsing.allocatedPort(out.stdout) : nil
+    }
+
+    func removeForward(port: UInt16, serial: String) {
+        run(["-s", serial, "forward", "--remove", "tcp:\(port)"], timeout: 5)
+    }
+}
+
+/// Thread-safe accumulation for pipe handlers.
+nonisolated final class OutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var out = Data()
+    private var err = Data()
+
+    func appendOut(_ data: Data) { lock.withLock { out.append(data) } }
+    func appendErr(_ data: Data) { lock.withLock { err.append(data) } }
+    var stdout: String { lock.withLock { String(decoding: out, as: UTF8.self) } }
+    var stderr: String { lock.withLock { String(decoding: err, as: UTF8.self) } }
+}
+
+nonisolated enum CoreLog {
+    static let adb = ConduitLogger("adb")
+    static let devices = ConduitLogger("devices")
+    static let discovery = ConduitLogger("wireless-discovery")
+    static let server = ConduitLogger("scrcpy-server")
+    static let mirroring = ConduitLogger("mirroring-owner")
+    static let engine = ConduitLogger("engine")
+}

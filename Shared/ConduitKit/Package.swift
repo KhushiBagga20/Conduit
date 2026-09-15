@@ -33,7 +33,9 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "ConduitProtocol", targets: ["ConduitProtocol"]),
+        .library(name: "ConduitState", targets: ["ConduitState"]),
         .library(name: "ConduitMedia", targets: ["ConduitMedia"]),
+        .library(name: "ConduitCore", targets: ["ConduitCore"]),
         .library(name: "ConduitDesign", targets: ["ConduitDesign"]),
     ],
     targets: [
@@ -44,6 +46,17 @@ let package = Package(
         ),
         .target(
             name: "ConduitMedia",
+            swiftSettings: appSettings
+        ),
+        .target(
+            name: "ConduitState",
+            dependencies: ["ConduitProtocol", "ConduitMedia"],
+            swiftSettings: appSettings
+        ),
+        .target(
+            name: "ConduitCore",
+            dependencies: ["ConduitProtocol", "ConduitState", "ConduitMedia"],
+            resources: [.copy("Resources/scrcpy-server-v4.1")],
             swiftSettings: appSettings
         ),
         .target(
@@ -59,6 +72,11 @@ let package = Package(
         .testTarget(
             name: "ConduitMediaTests",
             dependencies: ["ConduitMedia"],
+            swiftSettings: appSettings
+        ),
+        .testTarget(
+            name: "ConduitCoreTests",
+            dependencies: ["ConduitCore"],
             swiftSettings: appSettings
         ),
     ]
