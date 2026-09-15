@@ -2,11 +2,21 @@
 <!--
   Conduit for Android.
 
-  No permissions yet: this build is the interface shell. Each permission
-  arrives with the feature that needs it, together with an explanation shown
-  before the system prompt — Conduit asks only when a feature is used.
+  Each permission arrives with the feature that needs it, together with an
+  explanation shown before any prompt — Conduit asks only when a feature is
+  used.
+
+  WRITE_SECURE_SETTINGS lets the Wireless debugging and stay-awake toggles
+  work. Android never grants it to an app on its own: it is granted over adb,
+  from Conduit for Mac, when the user asks. Until then the toggles explain
+  that instead of failing silently.
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <application
         android:allowBackup="false"

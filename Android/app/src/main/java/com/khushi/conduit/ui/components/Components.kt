@@ -1,6 +1,22 @@
 package com.khushi.conduit.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -212,3 +228,122 @@ fun FeatureId.icon(): ImageVector = when (this) {
 
 fun FeatureId.title(): String =
     DesignTokens.Feature.all.firstOrNull { it.id == wire }?.title ?: wire
+
+/**
+ * A Quick Settings–style toggle: a rounded tile that fills with the primary
+ * colour when on. Planned features use it disabled, labelled "Planned".
+ */
+@Composable
+fun ToggleTile(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    checked: Boolean,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit = {},
+) {
+    val scheme = MaterialTheme.colorScheme
+    val container by animateColorAsState(
+        when {
+            !enabled -> scheme.surfaceContainerHigh.copy(alpha = 0.55f)
+            checked -> scheme.primary
+            else -> scheme.surfaceContainerHigh
+        },
+        label = "tile container",
+    )
+    val content by animateColorAsState(if (checked && enabled) scheme.onPrimary else scheme.onSurface, label = "tile content")
+
+    Surface(
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        enabled = enabled,
+        modifier = modifier
+            .height(76.dp)
+            .semantics { stateDescription = subtitle },
+        shape = RoundedCornerShape(DesignTokens.Radius.extraLarge.dp),
+        color = container,
+        contentColor = content,
+    ) {
+        Row(
+            Modifier.padding(horizontal = DesignTokens.Spacing.m.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .background(
+                        if (checked && enabled) scheme.onPrimary.copy(alpha = 0.18f) else scheme.primaryContainer,
+                        CircleShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = when {
+                        !enabled -> scheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        checked -> scheme.onPrimary
+                        else -> scheme.primary
+                    },
+                )
+            }
+            Spacer(Modifier.width(DesignTokens.Spacing.m.dp))
+            Column(Modifier.weight(1f).alpha(if (enabled) 1f else 0.6f)) {
+                Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = content.copy(alpha = 0.72f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/** A settings row with a switch, following Material's list item layout. */
+@Composable
+fun SwitchRow(
+    title: String,
+    supporting: String,
+    icon: ImageVector,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(supporting) },
+        leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = onCheckedChange) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.toggleable(value = checked, onValueChange = onCheckedChange, role = Role.Switch),
+    )
+}
+
+/**
+ * Shown when a toggle needs WRITE_SECURE_SETTINGS that Android only grants
+ * over adb. Says exactly how to get it, and offers the manual route.
+ */
+@Composable
+fun NeedsPermissionDialog(onOpenDeveloperOptions: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Lock, contentDescription = null) },
+        title = { Text("Allow Conduit to change this") },
+        text = {
+            Text(
+                "Android only lets Conduit change developer settings after your Mac allows it. " +
+                    "Connect this phone to your Mac with USB, then in Conduit for Mac open Devices and choose " +
+                    "Allow Wireless Debugging Control.\n\nYou can also change it yourself in Developer options.",
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onOpenDeveloperOptions) { Text("Open Developer options") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Not now") }
+        },
+    )
+}
