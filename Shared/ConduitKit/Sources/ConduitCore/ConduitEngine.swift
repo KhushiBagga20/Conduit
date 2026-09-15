@@ -34,6 +34,14 @@ public final class ConduitEngine: ConduitCommands {
     private var known: [String: KnownPhone] = [:]
     private var propertiesInFlight: Set<String> = []
     private var connectAttempts: [String: Date] = [:]
+    /// Phones that connected before their name was known. Announced once
+    /// their properties load, so activity never says "SM S928B connected".
+    private var unannouncedConnections: [String: PhoneTransport] = [:]
+    /// Phones whose current connection has been announced, so a transport
+    /// that resolves into an already-connected phone is not news.
+    private var announcedPhones: Set<String> = []
+    /// adb servers are restarted at most once per launch to unstick Wi-Fi.
+    private var restartedADBForWireless = false
     private var lastClipboardActivity = Date.distantPast
     private var started = false
 
@@ -87,6 +95,12 @@ public final class ConduitEngine: ConduitCommands {
         self.tracker = tracker
 
         discovery.onChange = { [weak self] endpoints in self?.wirelessEndpointsChanged(endpoints) }
+        discovery.onBlocked = { [weak self] _ in
+            self?.store.record(ActivityEvent(
+                kind: .permissionRequired,
+                title: "Allow Local Network access",
+                detail: "Conduit can't look for phones on Wi-Fi. Turn it on in System Settings → Privacy & Security → Local Network."))
+        }
 
         // Start the adb server off the main thread before anything spawns it
         // with a pipe attached.
@@ -182,6 +196,7 @@ public final class ConduitEngine: ConduitCommands {
 
         publishPhones()
         recordConnectionChanges(from: before, to: store.phones)
+        announcePendingConnections()
         mirroring?.phonesChanged()
     }
 
@@ -199,6 +214,7 @@ public final class ConduitEngine: ConduitCommands {
             remember(properties)
             publishPhones()
             recordConnectionChanges(from: before, to: store.phones)
+            announcePendingConnections()
             mirroring?.phonesChanged()
         }
     }
@@ -239,16 +255,46 @@ public final class ConduitEngine: ConduitCommands {
             case .connected(let transport):
                 // A phone that only changed transport is not news.
                 if case .connected = previous { continue }
-                store.record(ActivityEvent(kind: .phoneConnected, title: "\(phone.name) connected",
-                                           detail: transport == .usb ? "Over USB" : "Over Wi-Fi"))
+                guard phone.osVersion != nil else {
+                    unannouncedConnections[phone.id] = transport
+                    continue
+                }
+                announceConnection(phone, over: transport)
             case .unauthorized:
                 store.record(ActivityEvent(kind: .permissionRequired, title: "Allow debugging on \(phone.name)",
                                            detail: "Tap Allow on the phone so this Mac can connect."))
             case .disconnected where previous?.isConnected == true:
+                announcedPhones.remove(phone.id)
                 store.record(ActivityEvent(kind: .phoneDisconnected, title: "\(phone.name) disconnected"))
             default:
                 break
             }
+        }
+    }
+
+    private func announceConnection(_ phone: PhoneDevice, over transport: PhoneTransport) {
+        guard announcedPhones.insert(phone.id).inserted else { return }
+        store.record(ActivityEvent(kind: .phoneConnected, title: "\(phone.name) connected",
+                                   detail: transport == .usb ? "Over USB" : "Over Wi-Fi"))
+    }
+
+    private func announcePendingConnections() {
+        for (id, transport) in unannouncedConnections {
+            // The phone's ID can change once its hardware serial is known
+            // (a host:port transport), so match on either.
+            guard let phone = store.phones.first(where: { $0.id == id })
+                    ?? store.connectedPhones.first(where: { $0.osVersion != nil && $0.transports.contains(transport) }),
+                  phone.osVersion != nil, phone.connection.isConnected
+            else { continue }
+            unannouncedConnections[id] = nil
+            announceConnection(phone, over: transport)
+        }
+        // Forget phones that left before they could be announced. While any
+        // phone is still loading its properties its ID may not match yet,
+        // so keep waiting until none is.
+        if !store.connectedPhones.contains(where: { $0.osVersion == nil }) {
+            let connectedIDs = Set(store.connectedPhones.map(\.id))
+            unannouncedConnections = unannouncedConnections.filter { connectedIDs.contains($0.key) }
         }
     }
 
@@ -260,7 +306,10 @@ public final class ConduitEngine: ConduitCommands {
         for endpoint in endpoints {
             // Only phones this Mac already knows: someone else's phone
             // advertising on the same network is not ours to connect to.
-            guard let phoneID = endpoint.hardwareSerial, known[phoneID] != nil else { continue }
+            guard let phoneID = endpoint.hardwareSerial, known[phoneID] != nil else {
+                CoreLog.engine.info("ignoring a Wireless debugging phone this Mac has not seen before")
+                continue
+            }
             guard !attached.values.contains(where: { $0.phoneID == phoneID && $0.transport == .wifi && $0.device.isReady })
             else { continue }
 
@@ -270,7 +319,33 @@ public final class ConduitEngine: ConduitCommands {
 
             CoreLog.engine.info("connecting to a known phone over Wireless debugging")
             let host = endpoint.host, port = endpoint.port
-            Task.detached { _ = adb.connect(host: host, port: port) }
+            Task {
+                var output = await Task.detached { adb.run(["connect", "\(host):\(port)"], timeout: 12) }.value
+                if ADBParsing.connectSucceeded(output.combined) { return }
+
+                // MEASURED: an adb server started before the Mac changed
+                // networks (or by an app without Local Network access)
+                // answers "No route to host" even though Conduit itself just
+                // reached the phone's port to resolve it. Restarting the
+                // server from Conduit clears it. Never while mirroring: that
+                // would cut the session the user is watching.
+                guard ADBParsing.isNoRouteToHost(output.combined), !restartedADBForWireless,
+                      !store.mirroring.status.isActive else {
+                    CoreLog.engine.error("Wireless debugging connect failed — \(output.combined.trimmingCharacters(in: .whitespacesAndNewlines))")
+                    return
+                }
+                restartedADBForWireless = true
+                CoreLog.engine.notice("adb cannot reach a phone Conduit can reach; restarting the adb server")
+                store.record(ActivityEvent(kind: .reconnecting, title: "Restarting adb to reach your phone over Wi-Fi"))
+                output = await Task.detached { () -> ADB.Output in
+                    adb.run(["kill-server"], timeout: 10)
+                    adb.startServer()
+                    return adb.run(["connect", "\(host):\(port)"], timeout: 12)
+                }.value
+                if !ADBParsing.connectSucceeded(output.combined) {
+                    CoreLog.engine.error("Wireless debugging connect still failing — \(output.combined.trimmingCharacters(in: .whitespacesAndNewlines))")
+                }
+            }
         }
     }
 

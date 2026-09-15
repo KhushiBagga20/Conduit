@@ -45,7 +45,17 @@ enum PhoneRegistry {
                        preferredID: String?, now: Date = Date()) -> [PhoneDevice] {
         var phones: [String: PhoneDevice] = [:]
 
-        for (id, group) in Dictionary(grouping: attached, by: \.phoneID) {
+        // A Wi-Fi transport known only as host:port is anonymous until its
+        // properties load (a fraction of a second). Listing it meanwhile would
+        // flash a second copy of a phone that is already on USB. Transports
+        // that cannot load properties — unauthorised, offline — stay visible.
+        let identifiable = attached.filter { transport in
+            !(transport.device.isReady && transport.properties == nil
+              && ADBParsing.hardwareSerialHint(fromSerial: transport.device.serial) == nil
+              && transport.transport == .wifi)
+        }
+
+        for (id, group) in Dictionary(grouping: identifiable, by: \.phoneID) {
             let ready = group.filter { $0.device.isReady }
             let properties = group.compactMap(\.properties).first
             let remembered = known[id]

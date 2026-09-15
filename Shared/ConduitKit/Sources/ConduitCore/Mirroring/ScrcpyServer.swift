@@ -13,6 +13,12 @@
 //  The server is one-shot by design: it exits when its client disconnects.
 //  Deciding whether to launch it again is the owner's job, not this type's.
 //
+//  MEASURED on a Galaxy S24 Ultra: the server deletes its own jar from the
+//  phone as soon as it has loaded it. The jar is therefore pushed before
+//  every launch, and each server gets its own path — two servers launched
+//  close together from one shared path race, and the second one aborts
+//  because the first has already removed the file it is loading.
+//
 
 import ConduitMedia
 import ConduitState
@@ -23,7 +29,6 @@ final class ScrcpyServer {
 
     nonisolated static let version = "4.1"
     nonisolated static let expectedSHA256 = "deacb991ed2509715160ffdc7907e47b4160eb30d1566217e9047fd5b8850cae"
-    nonisolated static let devicePath = "/data/local/tmp/conduit-scrcpy-server.jar"
 
     nonisolated enum VideoSource: Sendable, Equatable {
         case display
@@ -64,6 +69,10 @@ final class ScrcpyServer {
         }
 
         var socketName: String { "scrcpy_\(String(format: "%08x", scid))" }
+
+        /// Where this server's jar is pushed. Unique per server: see the
+        /// file header for why a shared path is not safe.
+        var devicePath: String { "/data/local/tmp/conduit-scrcpy-\(String(format: "%08x", scid)).jar" }
     }
 
     nonisolated enum ServerError: LocalizedError {
@@ -144,7 +153,7 @@ final class ScrcpyServer {
         let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
         guard digest == expectedSHA256 else { throw ServerError.checksumMismatch }
 
-        let push = adb.push(jar, to: devicePath, serial: configuration.serial)
+        let push = adb.push(jar, to: configuration.devicePath, serial: configuration.serial)
         guard push.ok else {
             throw ServerError.pushFailed(push.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
         }
@@ -156,7 +165,7 @@ final class ScrcpyServer {
     }
 
     private func launch(port: UInt16) async throws {
-        let command = (["CLASSPATH=\(Self.devicePath)", "app_process", "/",
+        let command = (["CLASSPATH=\(configuration.devicePath)", "app_process", "/",
                         "com.genymobile.scrcpy.Server", Self.version] + configuration.arguments)
             .joined(separator: " ")
 
@@ -177,9 +186,14 @@ final class ScrcpyServer {
                 handle.readabilityHandler = nil
                 return
             }
-            // The server prints "Device: …" once its socket is listening.
+            // The server prints "Device: …" as it starts listening. MEASURED:
+            // the line can come a moment before the socket accepts, so the
+            // first connect would bounce and retry; a short grace avoids it.
             if String(decoding: data, as: UTF8.self).contains("Device:") {
-                Task { @MainActor in ready.fire(.success(())) }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(250))
+                    ready.fire(.success(()))
+                }
             }
         }
 

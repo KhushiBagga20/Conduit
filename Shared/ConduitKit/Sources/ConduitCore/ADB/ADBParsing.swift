@@ -116,6 +116,10 @@ nonisolated enum ADBParsing {
         UInt16(output.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    static func isNoRouteToHost(_ output: String) -> Bool {
+        output.lowercased().contains("no route to host")
+    }
+
     /// `adb connect` exits 0 even when it fails, so read the text.
     static func connectSucceeded(_ output: String) -> Bool {
         let text = output.lowercased()

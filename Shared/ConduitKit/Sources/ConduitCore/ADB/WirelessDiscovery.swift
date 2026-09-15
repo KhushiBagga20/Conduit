@@ -29,6 +29,11 @@ final class WirelessDiscovery {
     /// Called on the main actor with every resolved endpoint currently visible.
     var onChange: (([WirelessEndpoint]) -> Void)?
 
+    /// Called on the main actor when macOS blocks browsing — in practice,
+    /// when Local Network access has not been allowed for Conduit.
+    var onBlocked: ((String) -> Void)?
+    private var reportedBlocked = false
+
     private var browser: NWBrowser?
     private var endpoints: [String: WirelessEndpoint] = [:]
     private var resolving: Set<String> = []
@@ -40,9 +45,20 @@ final class WirelessDiscovery {
         browser.browseResultsChangedHandler = { [weak self] results, _ in
             Task { @MainActor [weak self] in self?.update(results) }
         }
-        browser.stateUpdateHandler = { state in
-            if case .failed(let error) = state {
+        browser.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                CoreLog.discovery.info("browser ready")
+            case .waiting(let error):
+                // A browser that is waiting never produces results. The usual
+                // cause is Local Network access being denied or not yet granted.
+                CoreLog.discovery.error("browser waiting — \(error.localizedDescription)")
+                Task { @MainActor [weak self] in self?.reportBlocked(error) }
+            case .failed(let error):
                 CoreLog.discovery.error("browser failed — \(error.localizedDescription)")
+                Task { @MainActor [weak self] in self?.reportBlocked(error) }
+            default:
+                break
             }
         }
         browser.start(queue: .main)
@@ -50,7 +66,14 @@ final class WirelessDiscovery {
         CoreLog.discovery.info("browsing for Wireless debugging")
     }
 
+    private func reportBlocked(_ error: NWError) {
+        guard !reportedBlocked else { return }
+        reportedBlocked = true
+        onBlocked?(error.localizedDescription)
+    }
+
     func stop() {
+        reportedBlocked = false
         browser?.cancel()
         browser = nil
         endpoints.removeAll()
@@ -58,6 +81,7 @@ final class WirelessDiscovery {
     }
 
     private func update(_ results: Set<NWBrowser.Result>) {
+        CoreLog.discovery.info("\(results.count) Wireless debugging service(s) visible")
         var visible: Set<String> = []
         for result in results {
             guard case let .service(name, _, _, _) = result.endpoint else { continue }
@@ -94,7 +118,10 @@ final class WirelessDiscovery {
 
         connection.stateUpdateHandler = { [weak self, connection] state in
             guard case .ready = state else {
-                if case .failed = state { connection.cancel() }
+                if case .failed(let error) = state {
+                    CoreLog.discovery.error("could not resolve a Wireless debugging service — \(error.localizedDescription)")
+                    connection.cancel()
+                }
                 return
             }
             defer { connection.cancel() }

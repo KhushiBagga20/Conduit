@@ -80,6 +80,8 @@ struct ADBParsingTests {
         #expect(ADBParsing.connectSucceeded("already connected to 10.0.0.5:37001\n"))
         #expect(!ADBParsing.connectSucceeded("failed to connect to '10.0.0.5:37001': Connection refused\n"))
         #expect(!ADBParsing.connectSucceeded("cannot connect to 10.0.0.5:37001: No route to host\n"))
+        #expect(ADBParsing.isNoRouteToHost("failed to connect to '10.0.0.5:45423': No route to host\n"))
+        #expect(!ADBParsing.isNoRouteToHost("failed to connect to '10.0.0.5:45423': Connection refused\n"))
     }
 }
 
@@ -105,6 +107,20 @@ struct PhoneRegistryTests {
 
         let targets = PhoneRegistry.targets(for: "RZCY60JS0PM", attached: attached)
         #expect(targets.map(\.transport) == [.usb, .wifi])
+    }
+
+    @Test("an anonymous Wi-Fi transport is hidden until its properties load")
+    func anonymousWiFiHidden() {
+        let usb = AttachedTransport(device: .init(serial: "RZCY60JS0PM", state: "device", model: nil), properties: properties)
+        let pending = AttachedTransport(device: .init(serial: "192.168.1.20:45423", state: "device", model: "SM S928B"))
+        #expect(PhoneRegistry.phones(attached: [usb, pending], known: [:], preferredID: nil).count == 1)
+
+        let resolved = AttachedTransport(device: pending.device, properties: properties)
+        let merged = PhoneRegistry.phones(attached: [usb, resolved], known: [:], preferredID: nil)
+        #expect(merged.count == 1 && merged[0].transports == [.usb, .wifi])
+
+        let unauthorised = AttachedTransport(device: .init(serial: "192.168.1.20:45423", state: "unauthorized", model: nil))
+        #expect(PhoneRegistry.phones(attached: [unauthorised], known: [:], preferredID: nil).first?.connection == .unauthorized)
     }
 
     @Test("remembered phones appear disconnected; unauthorised ones say so")
@@ -142,6 +158,7 @@ struct ScrcpyServerTests {
                                                        videoSource: .camera(facing: .front))
 
         #expect(configuration.socketName == "scrcpy_1234abcd")
+        #expect(configuration.devicePath == "/data/local/tmp/conduit-scrcpy-1234abcd.jar")
         #expect(configuration.arguments == [
             "scid=1234abcd", "log_level=info", "video=true", "audio=false", "audio_codec=raw",
             "control=true", "tunnel_forward=true", "video_bit_rate=4000000", "max_size=1024",
