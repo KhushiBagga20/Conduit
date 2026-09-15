@@ -2,7 +2,6 @@ package com.khushi.conduit.system
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.os.Handler
@@ -71,24 +70,41 @@ class PhoneSettings(context: Context) {
             Settings.Global.STAY_ON_WHILE_PLUGGED_IN,
             Settings.Global.DEVELOPMENT_SETTINGS_ENABLED,
         )
-
-        fun developerOptionsIntent(): Intent =
-            Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 }
 
+/** What the interface shows about this phone's connection settings. */
+@Stable
+interface PhoneSetup {
+    /** Whether Conduit for Mac has allowed this app to change the settings below. */
+    val canChange: Boolean
+    val developerOptions: Boolean
+    val usbDebugging: Boolean
+    val wirelessDebugging: Boolean
+    val stayAwakeWhileCharging: Boolean
+}
+
+/** A fixed [PhoneSetup], for previews. */
+data class PhoneSetupSample(
+    override val canChange: Boolean = true,
+    override val developerOptions: Boolean = true,
+    override val usbDebugging: Boolean = true,
+    override val wirelessDebugging: Boolean = true,
+    override val stayAwakeWhileCharging: Boolean = false,
+) : PhoneSetup
+
 /** Live, observable view of [PhoneSettings] for Compose. */
 @Stable
-class PhoneSettingsState internal constructor(private val settings: PhoneSettings) {
-    var canChange by mutableStateOf(false)
+class PhoneSettingsState internal constructor(private val settings: PhoneSettings) : PhoneSetup {
+    override var canChange by mutableStateOf(false)
         private set
-    var developerOptions by mutableStateOf(false)
+    override var developerOptions by mutableStateOf(false)
         private set
-    var usbDebugging by mutableStateOf(false)
+    override var usbDebugging by mutableStateOf(false)
         private set
-    var wirelessDebugging by mutableStateOf(false)
+    override var wirelessDebugging by mutableStateOf(false)
         private set
-    var stayAwakeWhileCharging by mutableStateOf(false)
+    override var stayAwakeWhileCharging by mutableStateOf(false)
         private set
 
     init {

@@ -10,6 +10,9 @@
   work. Android never grants it to an app on its own: it is granted over adb,
   from Conduit for Mac, when the user asks. Until then the toggles explain
   that instead of failing silently.
+
+  ACCESS_NETWORK_STATE reads the Wi-Fi link's signal strength and speed for
+  the home screen. It is granted at install and reveals no network name.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
@@ -17,6 +20,7 @@
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:allowBackup="false"
