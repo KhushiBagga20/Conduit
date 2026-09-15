@@ -26,8 +26,10 @@ a real phone, and a report of what changed and what is still limited.
 | Recovery after the phone-side server dies, and after losing USB mid-session | Done |
 | Two scrcpy servers side by side (for a background clipboard session) | Done |
 | Wireless debugging found through macOS Bonjour and connected automatically | Done |
+| Mirroring continues over Wi-Fi when the cable is pulled, in the Mac app | Done |
 | scrcpy camera source on the test phone | Done |
-| Android interface checked on the phone | Pending — the phone was locked |
+| Android interface checked on the phone | Done |
+| Phone screen off ignores touches | Not possible on the test phone — touch vibration is paused instead |
 | Device → Mac clipboard and audio playback checked by a person | Pending |
 
 ## Known platform limits
