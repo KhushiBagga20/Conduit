@@ -8,9 +8,10 @@ camera, send links and clipboard both ways, and handle calls — from an
 Android app, a menu bar utility and a full Mac workspace that all share one
 connection.
 
-> **Status: early development.** The foundation is being built. See the
-> [roadmap](Documentation/Roadmap.md) for what works today and what is
-> planned.
+> **Status: early development.** Conduit for Mac mirrors and controls a
+> phone over USB or Wireless debugging, with clipboard sync and audio.
+> Pairing with Conduit for Android, link sharing, calls and the trackpad are
+> planned. See the [roadmap](Documentation/Roadmap.md).
 
 ## One product, three interfaces
 
@@ -38,7 +39,8 @@ Conduit/
 └── Scripts/            Development checks
 ```
 
-Read [Documentation/Architecture.md](Documentation/Architecture.md) first.
+Read [Documentation/Architecture.md](Documentation/Architecture.md) first, then
+[Documentation/Development.md](Documentation/Development.md) to build and run.
 
 ## Requirements
 
