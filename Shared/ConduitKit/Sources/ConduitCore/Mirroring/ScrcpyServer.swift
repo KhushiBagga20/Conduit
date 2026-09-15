@@ -61,10 +61,13 @@ final class ScrcpyServer {
                 "video_bit_rate=\(options.effectiveBitRate)",
                 "max_size=\(options.maxSize(over: transport))",
                 "max_fps=\(options.maxFPS)",
-                // stay_awake only works while the phone is charging; over
-                // Wi-Fi the phone would sleep mid-session and drop the link.
-                // keep_active signals user activity instead, on any transport.
-                "stay_awake=\(options.stayAwake)",
+                // keep_active signals user activity, so the phone does not
+                // sleep mid-session on any transport. stay_awake is never
+                // used. MEASURED: it rewrites "stay awake while charging",
+                // and a server relaunched before the previous one's cleanup
+                // ran records the rewritten value as the original — so the
+                // phone was left staying awake after mirroring stopped.
+                "stay_awake=false",
                 "keep_active=\(options.stayAwake)",
             ]
             if case .camera(let facing) = videoSource {

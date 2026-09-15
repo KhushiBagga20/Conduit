@@ -183,7 +183,7 @@ struct ScrcpyServerTests {
         #expect(configuration.arguments == [
             "scid=1234abcd", "log_level=info", "video=true", "audio=false", "audio_codec=raw",
             "control=true", "tunnel_forward=true", "video_bit_rate=4000000", "max_size=1024",
-            "max_fps=60", "stay_awake=true", "keep_active=true", "video_source=camera", "camera_facing=front",
+            "max_fps=60", "stay_awake=false", "keep_active=true", "video_source=camera", "camera_facing=front",
         ])
     }
 
