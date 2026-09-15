@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -259,19 +260,19 @@ fun ToggleTile(
         onCheckedChange = onCheckedChange,
         enabled = enabled,
         modifier = modifier
-            .height(76.dp)
+            .heightIn(min = 76.dp)
             .semantics { stateDescription = subtitle },
         shape = RoundedCornerShape(DesignTokens.Radius.extraLarge.dp),
         color = container,
         contentColor = content,
     ) {
         Row(
-            Modifier.padding(horizontal = DesignTokens.Spacing.m.dp),
+            Modifier.padding(horizontal = DesignTokens.Spacing.m.dp, vertical = DesignTokens.Spacing.m.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 Modifier
-                    .size(40.dp)
+                    .size(36.dp)
                     .background(
                         if (checked && enabled) scheme.onPrimary.copy(alpha = 0.18f) else scheme.primaryContainer,
                         CircleShape,
@@ -290,7 +291,7 @@ fun ToggleTile(
             }
             Spacer(Modifier.width(DesignTokens.Spacing.m.dp))
             Column(Modifier.weight(1f).alpha(if (enabled) 1f else 0.6f)) {
-                Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
