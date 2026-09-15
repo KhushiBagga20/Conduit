@@ -33,6 +33,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "ConduitProtocol", targets: ["ConduitProtocol"]),
+        .library(name: "ConduitMedia", targets: ["ConduitMedia"]),
         .library(name: "ConduitDesign", targets: ["ConduitDesign"]),
     ],
     targets: [
@@ -40,6 +41,10 @@ let package = Package(
         .target(
             name: "ConduitProtocol",
             swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "ConduitMedia",
+            swiftSettings: appSettings
         ),
         .target(
             name: "ConduitDesign",
@@ -50,6 +55,11 @@ let package = Package(
             name: "ConduitProtocolTests",
             dependencies: ["ConduitProtocol"],
             swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "ConduitMediaTests",
+            dependencies: ["ConduitMedia"],
+            swiftSettings: appSettings
         ),
     ]
 )
