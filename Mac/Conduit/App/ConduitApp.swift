@@ -7,6 +7,7 @@
 //    MenuBarExtra  — always present; status, quick actions, activity
 //    Window        — the workspace; opened on demand, closing it changes
 //                    nothing about the connection
+//    Window        — the phone screen on its own, while mirroring
 //    Settings      — the standard Settings window (⌘,)
 //
 
@@ -39,6 +40,16 @@ struct ConduitApp: App {
         .commands {
             WorkspaceCommands(router: model.router)
         }
+
+        Window("Phone", id: WorkspaceRouter.phoneWindowID) {
+            PhoneWindowView()
+                .environment(model.store)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 400, height: 860)
+        .restorationBehavior(.disabled)
+        .defaultLaunchBehavior(.suppressed)
 
         Settings {
             SettingsWindow()

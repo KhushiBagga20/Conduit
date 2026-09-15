@@ -115,7 +115,7 @@ struct MenuBarPanel: View {
                         store.commands?.stopMirroring()
                     } else {
                         store.commands?.startMirroring(phoneID: phone?.id)
-                        open(.phoneScreen)
+                        showPhoneWindow()
                     }
                 }
 
@@ -174,10 +174,13 @@ struct MenuBarPanel: View {
             MenuDivider()
             MenuRow("Open Conduit", systemImage: "macwindow") { open(router.section) }
             if status.isActive {
-                MenuRow("Show Phone Screen", systemImage: "rectangle.on.rectangle") { open(.phoneScreen) }
+                MenuRow("Show Phone Screen", systemImage: "rectangle.on.rectangle") { showPhoneWindow() }
             }
             if case .failed = status {
-                MenuRow("Try Mirroring Again", systemImage: "arrow.clockwise") { store.commands?.restartMirroring() }
+                MenuRow("Try Mirroring Again", systemImage: "arrow.clockwise") {
+                    store.commands?.restartMirroring()
+                    showPhoneWindow()
+                }
             }
             MenuRow("Send Clipboard", systemImage: "doc.on.clipboard",
                     trailing: controlReady ? nil : "While mirroring", isEnabled: controlReady) {
@@ -233,6 +236,11 @@ struct MenuBarPanel: View {
         router.section = section
         openWindow(id: WorkspaceRouter.windowID)
         AppPresentation.windowOpened()
+    }
+
+    private func showPhoneWindow() {
+        openWindow(id: WorkspaceRouter.phoneWindowID)
+        NSApp.activate()
     }
 
     private func showSettings() {

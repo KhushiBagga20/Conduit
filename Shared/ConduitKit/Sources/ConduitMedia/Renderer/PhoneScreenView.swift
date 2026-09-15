@@ -25,15 +25,20 @@ import AppKit
 public struct PhoneScreenView: NSViewRepresentable {
     let renderer: VideoRenderer
     let input: InputController
+    let cornerRadius: CGFloat
 
-    public init(renderer: VideoRenderer, input: InputController) {
+    /// - Parameter cornerRadius: rounds the view's own corners. SwiftUI's
+    ///   clip shapes do not clip an AppKit-hosted display layer.
+    public init(renderer: VideoRenderer, input: InputController, cornerRadius: CGFloat = 0) {
         self.renderer = renderer
         self.input = input
+        self.cornerRadius = cornerRadius
     }
 
     public func makeNSView(context: Context) -> VideoHostView {
         let view = VideoHostView(displayLayer: renderer.displayLayer)
         view.inputController = input
+        view.setCornerRadius(cornerRadius)
         return view
     }
 
@@ -43,6 +48,7 @@ public struct PhoneScreenView: NSViewRepresentable {
         // the one it was created with. Re-attach if so.
         nsView.setDisplayLayer(renderer.displayLayer)
         nsView.inputController = input
+        nsView.setCornerRadius(cornerRadius)
     }
 }
 
@@ -75,6 +81,13 @@ public final class VideoHostView: NSView {
     }
 
     // MARK: - Layer Management
+
+    func setCornerRadius(_ radius: CGFloat) {
+        guard let layer, layer.cornerRadius != radius else { return }
+        layer.cornerRadius = radius
+        layer.cornerCurve = .continuous
+        layer.masksToBounds = radius > 0
+    }
 
     /// Swap in a new display layer (after a reconnect). No-op if unchanged.
     func setDisplayLayer(_ newLayer: AVSampleBufferDisplayLayer) {

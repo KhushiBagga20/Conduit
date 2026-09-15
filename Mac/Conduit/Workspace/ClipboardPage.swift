@@ -14,7 +14,7 @@ import SwiftUI
 
 struct ClipboardPage: View {
     @Environment(ConduitStore.self) private var store
-    @Environment(WorkspaceRouter.self) private var router
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let controlReady = store.mirroring.session?.control.state == .connected
@@ -53,8 +53,8 @@ struct ClipboardPage: View {
                     Spacer()
                     if !store.mirroring.status.isActive {
                         Button("Start Mirroring") {
-                            router.section = .phoneScreen
                             store.commands?.startMirroring(phoneID: nil)
+                            openWindow(id: WorkspaceRouter.phoneWindowID)
                         }
                         .disabled(store.activePhone?.connection.isConnected != true)
                     }

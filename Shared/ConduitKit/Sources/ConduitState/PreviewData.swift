@@ -20,6 +20,8 @@ extension ConduitStore {
         case disconnected
         /// Nothing attached and nothing remembered.
         case empty
+        /// Connected, with mirroring waiting for the phone to come back.
+        case waitingForPhone
     }
 
     public static func preview(_ scenario: PreviewScenario = .connected) -> ConduitStore {
@@ -54,6 +56,13 @@ extension ConduitStore {
             store.activePhoneID = "PREVIEW-S24"
         case .empty:
             break
+        case .waitingForPhone:
+            let connected = preview(.connected)
+            store.phones = connected.phones
+            store.activePhoneID = connected.activePhoneID
+            store.mirroring.phoneID = connected.activePhoneID
+            store.mirroring.phase = .active
+            store.mirroring.isWaitingForPhone = true
         }
         return store
     }

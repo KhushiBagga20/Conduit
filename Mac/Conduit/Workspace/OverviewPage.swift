@@ -14,6 +14,7 @@ import SwiftUI
 struct OverviewPage: View {
     @Environment(ConduitStore.self) private var store
     @Environment(WorkspaceRouter.self) private var router
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -118,12 +119,12 @@ struct OverviewPage: View {
             Spacer()
             if phone.connection.isConnected {
                 if store.mirroring.status.isActive {
-                    Button("Show Screen") { router.section = .phoneScreen }
+                    Button("Show Screen") { openWindow(id: WorkspaceRouter.phoneWindowID) }
                         .controlSize(.large)
                 } else {
                     Button {
-                        router.section = .phoneScreen
                         store.commands?.startMirroring(phoneID: phone.id)
+                        openWindow(id: WorkspaceRouter.phoneWindowID)
                     } label: {
                         Label("Mirror Screen", systemImage: "rectangle.on.rectangle")
                     }

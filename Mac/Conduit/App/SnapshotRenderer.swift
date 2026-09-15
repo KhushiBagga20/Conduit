@@ -50,6 +50,10 @@ enum SnapshotRenderer {
             }
         }
 
+        render(PhoneWindowView().environment(ConduitStore.preview(.waitingForPhone)),
+               size: CGSize(width: 400, height: 820), appearance: .darkAqua, titled: true,
+               to: directory.appendingPathComponent("phone-window-waiting.png"))
+
         render(WorkspaceView().environment(ConduitStore.preview(.empty)).environment(WorkspaceRouter()),
                size: CGSize(width: 1000, height: 700), appearance: .aqua, titled: true,
                to: directory.appendingPathComponent("workspace-overview-empty-light.png"))

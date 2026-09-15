@@ -14,6 +14,7 @@ import SwiftUI
 final class WorkspaceRouter {
 
     static let windowID = "workspace"
+    static let phoneWindowID = "phone"
 
     enum Section: String, CaseIterable, Identifiable, Hashable {
         case overview, phoneScreen, trackpad, camera, calls, links, clipboard, activity, devices, settings
