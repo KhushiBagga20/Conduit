@@ -7,6 +7,7 @@
 //
 
 import ConduitMedia
+import ConduitState
 import Darwin
 import Foundation
 
@@ -108,6 +109,29 @@ nonisolated struct ADB: Sendable {
 
     func connect(host: String, port: UInt16) -> Bool {
         ADBParsing.connectSucceeded(run(["connect", "\(host):\(port)"], timeout: 12).combined)
+    }
+
+    nonisolated static let companionPackage = "com.khushi.conduit"
+    nonisolated static let secureSettingsPermission = "android.permission.WRITE_SECURE_SETTINGS"
+
+    /// Whether Conduit for Android is installed, and whether it may change
+    /// secure settings. `pm list packages` is avoided: on phones with a
+    /// Secure Folder profile it fails for the shell user.
+    func companionAppStatus(serial: String) -> CompanionAppStatus? {
+        let path = run(["-s", serial, "shell", "pm", "path", Self.companionPackage], timeout: 8)
+        guard path.status != -1 else { return nil }
+        guard path.stdout.contains("package:") else { return .notInstalled }
+        let dump = run(["-s", serial, "shell", "dumpsys", "package", Self.companionPackage], timeout: 10)
+        return .installed(canManageSettings: ADBParsing.permissionGranted(Self.secureSettingsPermission, in: dump.stdout))
+    }
+
+    func grantCompanionSettingsControl(serial: String) -> Bool {
+        run(["-s", serial, "shell", "pm", "grant", Self.companionPackage, Self.secureSettingsPermission], timeout: 10).ok
+    }
+
+    /// Drop a network transport. Harmless for one that is already gone.
+    func disconnect(_ serial: String) {
+        run(["disconnect", serial], timeout: 5)
     }
 
     func push(_ local: URL, to remote: String, serial: String) -> Output {

@@ -35,8 +35,12 @@ final class WirelessDiscovery {
     private var reportedBlocked = false
 
     private var browser: NWBrowser?
-    private var endpoints: [String: WirelessEndpoint] = [:]
+    private var resolved: [String: WirelessEndpoint] = [:]
     private var resolving: Set<String> = []
+    private var lastResults: Set<NWBrowser.Result> = []
+
+    /// Every resolved endpoint currently advertised.
+    var endpoints: [WirelessEndpoint] { Array(resolved.values) }
 
     func start() {
         guard browser == nil else { return }
@@ -76,25 +80,37 @@ final class WirelessDiscovery {
         reportedBlocked = false
         browser?.cancel()
         browser = nil
-        endpoints.removeAll()
+        resolved.removeAll()
         resolving.removeAll()
+        lastResults.removeAll()
+    }
+
+    /// Forget a resolved address and resolve the service again. The port
+    /// changes whenever Wireless debugging restarts on the phone, while the
+    /// service can keep advertising under the same name.
+    func refresh(serviceName: String) {
+        guard resolved.removeValue(forKey: serviceName) != nil else { return }
+        update(lastResults)
     }
 
     private func update(_ results: Set<NWBrowser.Result>) {
-        CoreLog.discovery.info("\(results.count) Wireless debugging service(s) visible")
+        if results != lastResults {
+            CoreLog.discovery.info("\(results.count) Wireless debugging service(s) visible")
+        }
+        lastResults = results
         var visible: Set<String> = []
         for result in results {
             guard case let .service(name, _, _, _) = result.endpoint else { continue }
             visible.insert(name)
-            if endpoints[name] == nil, !resolving.contains(name) {
+            if resolved[name] == nil, !resolving.contains(name) {
                 resolve(name: name, endpoint: result.endpoint)
             }
         }
 
-        let before = endpoints.count
-        endpoints = endpoints.filter { visible.contains($0.key) }
-        if endpoints.count != before {
-            onChange?(Array(endpoints.values))
+        let before = resolved.count
+        resolved = resolved.filter { visible.contains($0.key) }
+        if resolved.count != before {
+            onChange?(endpoints)
         }
     }
 
@@ -134,14 +150,13 @@ final class WirelessDiscovery {
                 guard let self else { return }
                 timeout.cancel()
                 self.resolving.remove(name)
-                let resolved = WirelessEndpoint(
+                self.resolved[name] = WirelessEndpoint(
                     serviceName: name,
                     hardwareSerial: ADBParsing.hardwareSerialHint(fromServiceName: name),
                     host: address,
                     port: port.rawValue)
-                self.endpoints[name] = resolved
                 CoreLog.discovery.info("resolved a Wireless debugging endpoint on port \(port.rawValue)")
-                self.onChange?(Array(self.endpoints.values))
+                self.onChange?(self.endpoints)
             }
         }
         connection.start(queue: .main)

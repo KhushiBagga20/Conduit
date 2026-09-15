@@ -28,20 +28,24 @@ public final class ConduitEngine: ConduitCommands {
     private let defaults: UserDefaults
     private var tracker: DeviceTracker?
     private let discovery = WirelessDiscovery()
+    private var reconnector: WirelessReconnector?
     private var mirroring: MirroringController?
+    private var settingsGuard: PhoneSettingsGuard?
 
     private var attached: [String: AttachedTransport] = [:]
     private var known: [String: KnownPhone] = [:]
     private var propertiesInFlight: Set<String> = []
-    private var connectAttempts: [String: Date] = [:]
+    private var propertyFailures: [String: Int] = [:]
+    private var companionApps: [String: CompanionAppStatus] = [:]
+    /// Wi-Fi transports Conduit connected itself, by serial, and the phone
+    /// each belongs to — so they are usable before properties load.
+    private var wifiIdentities: [String: String] = [:]
     /// Phones that connected before their name was known. Announced once
     /// their properties load, so activity never says "SM S928B connected".
     private var unannouncedConnections: [String: PhoneTransport] = [:]
     /// Phones whose current connection has been announced, so a transport
     /// that resolves into an already-connected phone is not news.
     private var announcedPhones: Set<String> = []
-    /// adb servers are restarted at most once per launch to unstick Wi-Fi.
-    private var restartedADBForWireless = false
     private var lastClipboardActivity = Date.distantPast
     private var started = false
 
@@ -88,13 +92,27 @@ public final class ConduitEngine: ConduitCommands {
         mirroring.options = { [weak self] in self?.store.preferences.mirroring ?? MirroringOptions() }
         mirroring.onDeviceClipboard = { [weak self] text in self?.deviceClipboardChanged(text) }
         mirroring.record = { [weak self] event in self?.store.record(event) }
+        mirroring.onSessionEnded = { [weak self] phoneID in self?.mirroringEnded(phoneID: phoneID) }
+        mirroring.onSessionResumed = { [weak self] in self?.reapplyPhoneScreenState() }
         self.mirroring = mirroring
+        settingsGuard = PhoneSettingsGuard(adb: adb, defaults: defaults)
 
         let tracker = DeviceTracker(adb: adb)
         tracker.onUpdate = { [weak self] devices in self?.devicesChanged(devices) }
         self.tracker = tracker
 
-        discovery.onChange = { [weak self] endpoints in self?.wirelessEndpointsChanged(endpoints) }
+        let reconnector = WirelessReconnector(adb: adb, discovery: discovery)
+        reconnector.isEnabled = { [weak self] in self?.store.preferences.autoConnectWireless ?? false }
+        reconnector.isKnownPhone = { [weak self] id in self?.known[id] != nil }
+        reconnector.wifiTransports = { [weak self] id in
+            self?.attached.values.filter { $0.phoneID == id && $0.transport == .wifi }.map(\.device) ?? []
+        }
+        reconnector.isMirroring = { [weak self] in self?.store.mirroring.status.isActive ?? false }
+        reconnector.record = { [weak self] event in self?.store.record(event) }
+        reconnector.onConnected = { [weak self] serial, phoneID in self?.wifiTransportConnected(serial, phoneID: phoneID) }
+        self.reconnector = reconnector
+
+        discovery.onChange = { [weak self] _ in self?.reconnector?.evaluate() }
         discovery.onBlocked = { [weak self] _ in
             self?.store.record(ActivityEvent(
                 kind: .permissionRequired,
@@ -107,7 +125,10 @@ public final class ConduitEngine: ConduitCommands {
         Task {
             await Task.detached { adb.startServer() }.value
             tracker.start()
-            if store.preferences.autoConnectWireless { discovery.start() }
+            if store.preferences.autoConnectWireless {
+                discovery.start()
+                reconnector.start()
+            }
         }
     }
 
@@ -157,6 +178,74 @@ public final class ConduitEngine: ConduitCommands {
         store.record(ActivityEvent(kind: .clipboardSynced, title: "Clipboard sent to phone"))
     }
 
+    public func setPhoneScreen(on: Bool) {
+        guard let session = store.mirroring.session, session.control.state == .connected,
+              let phoneID = store.mirroring.phoneID, let serial = mirroring?.currentSerial else { return }
+
+        if on {
+            session.input.setDisplayPower(on: true)
+            store.mirroring.isPhoneScreenOff = false
+            store.record(ActivityEvent(kind: .mirroringStarted, title: "Phone screen turned on"))
+            Task { await settingsGuard?.restoreAll(phoneID: phoneID, serial: serial) }
+        } else {
+            store.mirroring.isPhoneScreenOff = true
+            session.input.setDisplayPower(on: false)
+            store.record(ActivityEvent(
+                kind: .mirroringStopped, title: "Phone screen turned off",
+                detail: "Mirroring continues. This phone keeps its touchscreen active, so touch vibration is paused until the screen is back on."))
+            // MEASURED on a Galaxy S24 Ultra: turning the panel off leaves the
+            // touchscreen live, and every accidental tap buzzed. Touch
+            // vibration is paused while the screen is off and put back after.
+            Task {
+                await settingsGuard?.override(.system, "haptic_feedback_enabled", to: "0",
+                                              phoneID: phoneID, serial: serial)
+            }
+        }
+    }
+
+    private func reapplyPhoneScreenState() {
+        guard store.mirroring.isPhoneScreenOff, let session = store.mirroring.session else { return }
+        session.input.setDisplayPower(on: false)
+    }
+
+    private func mirroringEnded(phoneID: String) {
+        store.mirroring.isPhoneScreenOff = false
+        restoreSettingsIfPossible(phoneID: phoneID)
+    }
+
+    /// Put back any phone setting Conduit changed, over any ready transport.
+    /// A phone that is not attached is restored when it next attaches.
+    private func restoreSettingsIfPossible(phoneID: String) {
+        guard let settingsGuard, settingsGuard.hasPending(for: phoneID),
+              let serial = PhoneRegistry.targets(for: phoneID, attached: Array(attached.values)).first?.serial
+        else { return }
+        Task { await settingsGuard.restoreAll(phoneID: phoneID, serial: serial) }
+    }
+
+    public func allowCompanionSettingsControl(phoneID: String) {
+        guard let adb, let serial = PhoneRegistry.targets(for: phoneID, attached: Array(attached.values)).first?.serial
+        else { return }
+        Task {
+            let granted = await Task.detached { adb.grantCompanionSettingsControl(serial: serial) }.value
+            if granted {
+                store.record(ActivityEvent(kind: .permissionRequired, title: "Conduit for Android can manage Wireless debugging"))
+            } else {
+                store.record(ActivityEvent(kind: .error, title: "Couldn't allow Wireless debugging control",
+                                           detail: "Update Conduit for Android on the phone, then try again."))
+            }
+            refreshCompanionApp(phoneID: phoneID, serial: serial)
+        }
+    }
+
+    private func refreshCompanionApp(phoneID: String, serial: String) {
+        guard let adb else { return }
+        Task {
+            guard let status = await Task.detached(operation: { adb.companionAppStatus(serial: serial) }).value else { return }
+            companionApps[phoneID] = status
+            publishPhones()
+        }
+    }
+
     public func updatePreferences(_ change: (inout Preferences) -> Void) {
         var preferences = store.preferences
         change(&preferences)
@@ -169,7 +258,13 @@ public final class ConduitEngine: ConduitCommands {
         }
 
         if wirelessChanged, started, adb != nil {
-            preferences.autoConnectWireless ? discovery.start() : discovery.stop()
+            if preferences.autoConnectWireless {
+                discovery.start()
+                reconnector?.start()
+            } else {
+                reconnector?.stop()
+                discovery.stop()
+            }
         }
     }
 
@@ -184,11 +279,14 @@ public final class ConduitEngine: ConduitCommands {
 
         var next: [String: AttachedTransport] = [:]
         for device in devices {
-            var entry = AttachedTransport(device: device, properties: attached[device.serial]?.properties)
+            var entry = AttachedTransport(device: device, properties: attached[device.serial]?.properties,
+                                          identityHint: wifiIdentities[device.serial])
             if !device.isReady { entry.properties = nil }
             next[device.serial] = entry
         }
         attached = next
+        wifiIdentities = wifiIdentities.filter { next[$0.key] != nil }
+        propertyFailures = propertyFailures.filter { next[$0.key] != nil }
 
         for entry in next.values where entry.device.isReady && entry.properties == nil {
             loadProperties(serial: entry.device.serial)
@@ -198,6 +296,7 @@ public final class ConduitEngine: ConduitCommands {
         recordConnectionChanges(from: before, to: store.phones)
         announcePendingConnections()
         mirroring?.phonesChanged()
+        reconnector?.evaluate()
     }
 
     private func loadProperties(serial: String) {
@@ -207,7 +306,33 @@ public final class ConduitEngine: ConduitCommands {
         Task {
             let properties = await Task.detached { adb.properties(of: serial) }.value
             propertiesInFlight.remove(serial)
-            guard let properties, attached[serial] != nil else { return }
+            guard attached[serial] != nil else { return }
+
+            guard let properties else {
+                // MEASURED: a transport that has just appeared — above all
+                // over Wi-Fi as the cable is pulled — can refuse its first
+                // shell command. Without a retry it stays anonymous, and an
+                // anonymous transport can never carry a session.
+                let failures = (propertyFailures[serial] ?? 0) + 1
+                propertyFailures[serial] = failures
+                guard failures < 6 else {
+                    CoreLog.devices.error("could not read a phone's properties after \(failures) attempts")
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(failures)) { [weak self] in
+                    guard let self, self.attached[serial]?.device.isReady == true,
+                          self.attached[serial]?.properties == nil else { return }
+                    self.loadProperties(serial: serial)
+                }
+                return
+            }
+            propertyFailures[serial] = nil
+            if companionApps[properties.hardwareSerial] == nil {
+                refreshCompanionApp(phoneID: properties.hardwareSerial, serial: serial)
+            }
+            if store.mirroring.phoneID != properties.hardwareSerial || !store.mirroring.isPhoneScreenOff {
+                restoreSettingsIfPossible(phoneID: properties.hardwareSerial)
+            }
 
             let before = store.phones
             attached[serial]?.properties = properties
@@ -230,7 +355,8 @@ public final class ConduitEngine: ConduitCommands {
 
     private func publishPhones() {
         store.phones = PhoneRegistry.phones(attached: Array(attached.values), known: known,
-                                            preferredID: store.preferences.preferredPhoneID)
+                                            preferredID: store.preferences.preferredPhoneID,
+                                            companionApps: companionApps)
 
         // Keep the user's choice while it exists; otherwise prefer the
         // preferred phone, then any connected phone, then anything known.
@@ -300,53 +426,15 @@ public final class ConduitEngine: ConduitCommands {
 
     // MARK: - Wireless debugging
 
-    private func wirelessEndpointsChanged(_ endpoints: [WirelessEndpoint]) {
-        guard let adb, store.preferences.autoConnectWireless else { return }
-
-        for endpoint in endpoints {
-            // Only phones this Mac already knows: someone else's phone
-            // advertising on the same network is not ours to connect to.
-            guard let phoneID = endpoint.hardwareSerial, known[phoneID] != nil else {
-                CoreLog.engine.info("ignoring a Wireless debugging phone this Mac has not seen before")
-                continue
-            }
-            guard !attached.values.contains(where: { $0.phoneID == phoneID && $0.transport == .wifi && $0.device.isReady })
-            else { continue }
-
-            let key = "\(endpoint.host):\(endpoint.port)"
-            if let last = connectAttempts[key], Date().timeIntervalSince(last) < 30 { continue }
-            connectAttempts[key] = Date()
-
-            CoreLog.engine.info("connecting to a known phone over Wireless debugging")
-            let host = endpoint.host, port = endpoint.port
-            Task {
-                var output = await Task.detached { adb.run(["connect", "\(host):\(port)"], timeout: 12) }.value
-                if ADBParsing.connectSucceeded(output.combined) { return }
-
-                // MEASURED: an adb server started before the Mac changed
-                // networks (or by an app without Local Network access)
-                // answers "No route to host" even though Conduit itself just
-                // reached the phone's port to resolve it. Restarting the
-                // server from Conduit clears it. Never while mirroring: that
-                // would cut the session the user is watching.
-                guard ADBParsing.isNoRouteToHost(output.combined), !restartedADBForWireless,
-                      !store.mirroring.status.isActive else {
-                    CoreLog.engine.error("Wireless debugging connect failed — \(output.combined.trimmingCharacters(in: .whitespacesAndNewlines))")
-                    return
-                }
-                restartedADBForWireless = true
-                CoreLog.engine.notice("adb cannot reach a phone Conduit can reach; restarting the adb server")
-                store.record(ActivityEvent(kind: .reconnecting, title: "Restarting adb to reach your phone over Wi-Fi"))
-                output = await Task.detached { () -> ADB.Output in
-                    adb.run(["kill-server"], timeout: 10)
-                    adb.startServer()
-                    return adb.run(["connect", "\(host):\(port)"], timeout: 12)
-                }.value
-                if !ADBParsing.connectSucceeded(output.combined) {
-                    CoreLog.engine.error("Wireless debugging connect still failing — \(output.combined.trimmingCharacters(in: .whitespacesAndNewlines))")
-                }
-            }
-        }
+    private func wifiTransportConnected(_ serial: String, phoneID: String) {
+        wifiIdentities[serial] = phoneID
+        guard attached[serial] != nil, attached[serial]?.identityHint != phoneID else { return }
+        let before = store.phones
+        attached[serial]?.identityHint = phoneID
+        publishPhones()
+        recordConnectionChanges(from: before, to: store.phones)
+        announcePendingConnections()
+        mirroring?.phonesChanged()
     }
 
     // MARK: - Clipboard

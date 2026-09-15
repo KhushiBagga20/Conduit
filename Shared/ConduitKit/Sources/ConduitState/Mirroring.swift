@@ -16,16 +16,45 @@ public nonisolated struct MirroringOptions: Codable, Sendable, Equatable {
     public var maxFPS: Int = 60
     /// Forward the phone's audio to the Mac while mirroring.
     public var audio: Bool = true
-    /// Hold the phone awake for the session.
+    /// Hold the phone awake for the session — over USB and over Wi-Fi.
     public var stayAwake: Bool = true
     /// 1024 px at 4 Mbps. Fewer pixels help far more than a lower bitrate
     /// on a jittery Wi-Fi link.
     public var lowLatency: Bool = false
+    /// Over Wi-Fi, cap the picture at `wifiMaxSize`. MEASURED: the test
+    /// network's round trip swung between 8 and 85 ms; fewer pixels to encode,
+    /// send and decode is what keeps a wireless session responsive.
+    public var adaptToWiFi: Bool = true
+
+    public static let wifiMaxSize = 1280
 
     public init() {}
 
     public var effectiveMaxSize: Int { lowLatency ? 1024 : maxSize }
     public var effectiveBitRate: Int { lowLatency ? 4_000_000 : bitRate }
+
+    /// The longest edge to request for a session over `transport`.
+    public func maxSize(over transport: PhoneTransport) -> Int {
+        guard transport == .wifi, adaptToWiFi else { return effectiveMaxSize }
+        return min(effectiveMaxSize, Self.wifiMaxSize)
+    }
+
+    // Decoding tolerates settings saved by older builds that lack newer keys.
+    private enum CodingKeys: String, CodingKey {
+        case maxSize, bitRate, maxFPS, audio, stayAwake, lowLatency, adaptToWiFi
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = MirroringOptions()
+        maxSize = try c.decodeIfPresent(Int.self, forKey: .maxSize) ?? defaults.maxSize
+        bitRate = try c.decodeIfPresent(Int.self, forKey: .bitRate) ?? defaults.bitRate
+        maxFPS = try c.decodeIfPresent(Int.self, forKey: .maxFPS) ?? defaults.maxFPS
+        audio = try c.decodeIfPresent(Bool.self, forKey: .audio) ?? defaults.audio
+        stayAwake = try c.decodeIfPresent(Bool.self, forKey: .stayAwake) ?? defaults.stayAwake
+        lowLatency = try c.decodeIfPresent(Bool.self, forKey: .lowLatency) ?? defaults.lowLatency
+        adaptToWiFi = try c.decodeIfPresent(Bool.self, forKey: .adaptToWiFi) ?? defaults.adaptToWiFi
+    }
 }
 
 public nonisolated enum MirroringStatus: Sendable, Equatable {
@@ -34,6 +63,8 @@ public nonisolated enum MirroringStatus: Sendable, Equatable {
     case connecting
     case running
     case reconnecting(attempt: Int)
+    /// The phone disappeared mid-session; mirroring resumes when it is back.
+    case waitingForPhone
     case failed(String)
 
     public var isActive: Bool {
@@ -60,6 +91,13 @@ public final class MirroringState {
     /// The transport the current server runs over.
     public package(set) var transport: PhoneTransport?
 
+    /// True while the phone is unreachable mid-session. The session is kept
+    /// and resumes by itself when the phone returns over USB or Wi-Fi.
+    public package(set) var isWaitingForPhone = false
+
+    /// True while the phone's own screen is off and mirroring continues.
+    public package(set) var isPhoneScreenOff = false
+
     public enum Phase: Sendable, Equatable {
         case idle
         case startingServer
@@ -80,6 +118,7 @@ public final class MirroringState {
         case .failed(let message):
             return .failed(message)
         case .active:
+            if isWaitingForPhone { return .waitingForPhone }
             guard let session else { return .starting }
             if session.isReconnecting { return .reconnecting(attempt: session.reconnectAttempt) }
             switch session.stream.state {

@@ -81,6 +81,17 @@ struct ADBParsingTests {
         #expect(!ADBParsing.connectSucceeded("failed to connect to '10.0.0.5:37001': Connection refused\n"))
         #expect(!ADBParsing.connectSucceeded("cannot connect to 10.0.0.5:37001: No route to host\n"))
         #expect(ADBParsing.isNoRouteToHost("failed to connect to '10.0.0.5:45423': No route to host\n"))
+
+        let dumpsys = """
+            install permissions:
+              android.permission.INTERNET: granted=true
+              android.permission.WRITE_SECURE_SETTINGS: granted=true
+            runtime permissions:
+              android.permission.POST_NOTIFICATIONS: granted=false, flags=[ USER_SENSITIVE ]
+            """
+        #expect(ADBParsing.permissionGranted("android.permission.WRITE_SECURE_SETTINGS", in: dumpsys))
+        #expect(!ADBParsing.permissionGranted("android.permission.POST_NOTIFICATIONS", in: dumpsys))
+        #expect(!ADBParsing.permissionGranted("android.permission.CAMERA", in: dumpsys))
         #expect(!ADBParsing.isNoRouteToHost("failed to connect to '10.0.0.5:45423': Connection refused\n"))
     }
 }
@@ -123,6 +134,16 @@ struct PhoneRegistryTests {
         #expect(PhoneRegistry.phones(attached: [unauthorised], known: [:], preferredID: nil).first?.connection == .unauthorized)
     }
 
+    @Test("a Wi-Fi transport Conduit connected is usable before its properties load")
+    func identityHint() {
+        let hinted = AttachedTransport(device: .init(serial: "192.168.1.20:45423", state: "device", model: nil),
+                                       identityHint: "RZCY60JS0PM")
+        let known = ["RZCY60JS0PM": KnownPhone(id: "RZCY60JS0PM", name: "S24 Ultra", osVersion: "16", lastSeen: Date())]
+        let phones = PhoneRegistry.phones(attached: [hinted], known: known, preferredID: nil)
+        #expect(phones.count == 1 && phones[0].name == "S24 Ultra" && phones[0].connection == .connected(.wifi))
+        #expect(PhoneRegistry.targets(for: "RZCY60JS0PM", attached: [hinted]).map(\.transport) == [.wifi])
+    }
+
     @Test("remembered phones appear disconnected; unauthorised ones say so")
     func knownAndUnauthorised() {
         let known = ["OLD1": KnownPhone(id: "OLD1", name: "Old phone", lastSeen: Date(timeIntervalSince1970: 1))]
@@ -154,16 +175,51 @@ struct ScrcpyServerTests {
         var options = MirroringOptions()
         options.lowLatency = true
         options.audio = false
-        let configuration = ScrcpyServer.Configuration(serial: "S", scid: 0x1234abcd, options: options,
-                                                       videoSource: .camera(facing: .front))
+        let configuration = ScrcpyServer.Configuration(serial: "S", transport: .usb, scid: 0x1234abcd,
+                                                       options: options, videoSource: .camera(facing: .front))
 
         #expect(configuration.socketName == "scrcpy_1234abcd")
         #expect(configuration.devicePath == "/data/local/tmp/conduit-scrcpy-1234abcd.jar")
         #expect(configuration.arguments == [
             "scid=1234abcd", "log_level=info", "video=true", "audio=false", "audio_codec=raw",
             "control=true", "tunnel_forward=true", "video_bit_rate=4000000", "max_size=1024",
-            "max_fps=60", "stay_awake=true", "video_source=camera", "camera_facing=front",
+            "max_fps=60", "stay_awake=true", "keep_active=true", "video_source=camera", "camera_facing=front",
         ])
+    }
+
+    @Test("sessions over Wi-Fi are capped at 1280 px unless adaptation is off")
+    func wifiAdaptation() {
+        var options = MirroringOptions()
+        #expect(options.maxSize(over: .usb) == 1920)
+        #expect(options.maxSize(over: .wifi) == 1280)
+        options.lowLatency = true
+        #expect(options.maxSize(over: .wifi) == 1024)
+        options.lowLatency = false
+        options.adaptToWiFi = false
+        #expect(options.maxSize(over: .wifi) == 1920)
+
+        let wifi = ScrcpyServer.Configuration(serial: "10.0.0.5:37001", transport: .wifi, options: MirroringOptions())
+        #expect(wifi.arguments.contains("max_size=1280"))
+    }
+
+    @Test("options saved by an older build decode with defaults for new keys")
+    func optionsBackwardCompatible() throws {
+        let old = #"{"maxSize":1600,"bitRate":2000000,"maxFPS":30,"audio":false,"stayAwake":true,"lowLatency":false}"#
+        let decoded = try JSONDecoder().decode(MirroringOptions.self, from: Data(old.utf8))
+        #expect(decoded.maxSize == 1600 && decoded.maxFPS == 30 && !decoded.audio)
+        #expect(decoded.adaptToWiFi)
+    }
+
+    @Test("relaunch delays back off and cap")
+    func relaunchBackoff() {
+        #expect(MirroringController.relaunchDelay(afterFailures: 0) == 0.5)
+        #expect(MirroringController.relaunchDelay(afterFailures: 1) == 1)
+        #expect(MirroringController.relaunchDelay(afterFailures: 3) == 4)
+        #expect(MirroringController.relaunchDelay(afterFailures: 10) == 8)
+        #expect(WirelessReconnector.backoff(afterFailures: 0) == 0)
+        #expect(WirelessReconnector.backoff(afterFailures: 1) == 2)
+        #expect(WirelessReconnector.backoff(afterFailures: 4) == 16)
+        #expect(WirelessReconnector.backoff(afterFailures: 20) == 60)
     }
 
     @Test("random socket ids stay within 31 bits")

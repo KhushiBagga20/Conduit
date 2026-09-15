@@ -41,6 +41,13 @@ public protocol ConduitCommands: AnyObject {
     /// active mirroring session.
     func sendMacClipboardToPhone()
 
+    /// Turn the phone's own screen off or on while mirroring continues.
+    func setPhoneScreen(on: Bool)
+
+    /// Let Conduit for Android change Wireless debugging and stay-awake
+    /// settings on this phone. Granted over adb; the user asks for it.
+    func allowCompanionSettingsControl(phoneID: String)
+
     func updatePreferences(_ change: (inout Preferences) -> Void)
     func clearActivity()
 }

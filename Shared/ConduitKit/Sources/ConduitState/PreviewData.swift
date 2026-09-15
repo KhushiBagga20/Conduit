@@ -32,7 +32,8 @@ extension ConduitStore {
             store.phones = [
                 PhoneDevice(id: "PREVIEW-S24", name: "Galaxy S24 Ultra", model: "SM-S928B", manufacturer: "samsung",
                             osVersion: osVersion, connection: .connected(.usb), transports: [.usb, .wifi],
-                            features: previewFeatures(connected: true), lastSeen: Date(), isPreferred: true),
+                            features: previewFeatures(connected: true), lastSeen: Date(), isPreferred: true,
+                            companionApp: .installed(canManageSettings: false)),
             ]
             store.activePhoneID = "PREVIEW-S24"
             store.activity = [

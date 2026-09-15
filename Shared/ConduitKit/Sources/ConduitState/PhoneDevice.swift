@@ -36,6 +36,15 @@ public nonisolated enum PhoneConnection: Sendable, Equatable {
     }
 }
 
+/// Conduit for Android on this phone, as seen over adb.
+public nonisolated enum CompanionAppStatus: Sendable, Equatable {
+    case unknown
+    case notInstalled
+    /// Installed. `canManageSettings` is true once this Mac has allowed it to
+    /// change Wireless debugging and stay-awake settings.
+    case installed(canManageSettings: Bool)
+}
+
 public nonisolated struct PhoneDevice: Identifiable, Sendable, Equatable {
     /// The phone's hardware serial — stable across USB and Wi-Fi.
     public let id: String
@@ -50,11 +59,12 @@ public nonisolated struct PhoneDevice: Identifiable, Sendable, Equatable {
     public var features: [FeatureID: Availability]
     public var lastSeen: Date?
     public var isPreferred: Bool
+    public var companionApp: CompanionAppStatus
 
     public init(id: String, name: String, model: String? = nil, manufacturer: String? = nil,
                 osVersion: String? = nil, connection: PhoneConnection, transports: Set<PhoneTransport> = [],
                 battery: BatteryStatus? = nil, features: [FeatureID: Availability] = [:],
-                lastSeen: Date? = nil, isPreferred: Bool = false) {
+                lastSeen: Date? = nil, isPreferred: Bool = false, companionApp: CompanionAppStatus = .unknown) {
         self.id = id
         self.name = name
         self.model = model
@@ -66,6 +76,7 @@ public nonisolated struct PhoneDevice: Identifiable, Sendable, Equatable {
         self.features = features
         self.lastSeen = lastSeen
         self.isPreferred = isPreferred
+        self.companionApp = companionApp
     }
 
     /// "Samsung SM-S928B · Android 16", for secondary lines.

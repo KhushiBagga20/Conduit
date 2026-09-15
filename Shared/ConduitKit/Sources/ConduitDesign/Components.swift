@@ -2,11 +2,10 @@
 //  Components.swift
 //  ConduitDesign
 //
-//  Small building blocks every Mac surface uses, so status, availability and
-//  cards look the same in the menu bar and in the workspace.
+//  Small building blocks every Mac surface uses, so status looks the same in
+//  the menu bar and in the workspace.
 //
 
-import ConduitProtocol
 import SwiftUI
 
 // MARK: - Status
@@ -47,54 +46,5 @@ public struct StatusDot: View {
                        : .default, value: pulsing)
             .onAppear { pulsing = true }
             .accessibilityHidden(true)
-    }
-}
-
-// MARK: - Availability
-
-/// A label for a feature that is not simply available: Planned, Requires
-/// permission, Needs setup, Not supported on this device. Nothing in Conduit
-/// shows a button for a feature that cannot work without saying why.
-public struct AvailabilityBadge: View {
-    private let availability: Availability
-
-    public init(_ availability: Availability) {
-        self.availability = availability
-    }
-
-    public var body: some View {
-        Text(DesignTokens.availabilityLabel[availability.rawValue] ?? availability.rawValue)
-            .font(DesignTokens.Typography.caption.font.weight(.medium))
-            .foregroundStyle(foreground)
-            .padding(.horizontal, DesignTokens.Spacing.s)
-            .padding(.vertical, DesignTokens.Spacing.xxs)
-            .background(foreground.opacity(0.12), in: Capsule())
-    }
-
-    private var foreground: Color {
-        switch availability {
-        case .available, .active: DesignTokens.Color.statusConnected.color
-        case .requiresPermission, .requiresSetup: DesignTokens.Color.statusWorking.color
-        case .unsupported: DesignTokens.Color.statusError.color
-        case .disabled, .planned: DesignTokens.Color.textTertiary.color
-        }
-    }
-}
-
-// MARK: - Card
-
-public extension View {
-    /// Conduit's card surface: a quiet fill and a hairline border on a
-    /// continuous-corner rectangle. Cards always span their container, so a
-    /// short message never sits in a card narrower than its neighbours.
-    func conduitCard(padding: CGFloat = DesignTokens.Spacing.l) -> some View {
-        self
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(padding)
-            .background(DesignTokens.Color.surface.color,
-                        in: RoundedRectangle(cornerRadius: DesignTokens.Radius.large, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: DesignTokens.Radius.large, style: .continuous)
-                    .strokeBorder(DesignTokens.Color.border.color, lineWidth: 1))
     }
 }

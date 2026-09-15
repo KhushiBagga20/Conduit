@@ -12,14 +12,20 @@
 //  sockets with capped backoff; this controller makes sure there is a server
 //  for those retries to find:
 //
-//    - the server exits while mirroring  → launch it again
-//    - the phone moved transport          → launch on the new one (USB ↔ Wi-Fi)
-//    - the phone disappeared              → wait; launch when it returns
+//    - the server exits while mirroring   → relaunch it
+//    - its transport vanished             → relaunch on another (USB ↔ Wi-Fi)
+//    - no transport left                  → wait; relaunch when the phone returns
+//    - a launch fails                     → retry with backoff, then say so
 //    - three exits within seconds         → stop and say so
 //
+//  Every relaunch goes through one scheduler. MEASURED: pulling the cable
+//  ends the server process and removes the USB transport at almost the same
+//  moment, and handling the two separately launched two servers that raced
+//  each other; one pending relaunch at a time cannot.
+//
 
-import ConduitState
 import ConduitMedia
+import ConduitState
 import Foundation
 
 final class MirroringController {
@@ -38,14 +44,27 @@ final class MirroringController {
     var options: () -> MirroringOptions = { MirroringOptions() }
     var onDeviceClipboard: (String) -> Void = { _ in }
     var record: (ActivityEvent) -> Void = { _ in }
+    /// Called when a session that had started is torn down, with the phone.
+    var onSessionEnded: (_ phoneID: String) -> Void = { _ in }
+    /// Called after a relaunch reattaches, once input works again.
+    var onSessionResumed: () -> Void = {}
+
+    /// The adb serial the current server runs over.
+    var currentSerial: String? { currentTarget?.serial }
 
     private var server: ScrcpyServer?
     private var currentTarget: Target?
-    private var waitingForPhone = false
+    private var pendingRelaunch: DispatchWorkItem?
+    private var launchFailures = 0
     private var rapidExits = 0
 
     /// Bumped by start and stop; async work from an older generation is ignored.
     private var generation = 0
+
+    /// Launch attempts before giving up: a few for a fresh start, more for a
+    /// session that is already running and worth recovering.
+    static let maxStartAttempts = 3
+    static let maxRecoveryAttempts = 6
 
     init(adb: ADB, state: MirroringState) {
         self.adb = adb
@@ -58,6 +77,7 @@ final class MirroringController {
         teardown()
         generation += 1
         rapidExits = 0
+        launchFailures = 0
 
         state.phoneID = phoneID
         state.phase = .startingServer
@@ -91,30 +111,81 @@ final class MirroringController {
         guard state.phase == .active, let phoneID = state.phoneID else { return }
         let available = targets(phoneID)
 
-        if waitingForPhone, let best = available.first {
-            waitingForPhone = false
-            CoreLog.mirroring.info("phone is back over \(best.transport.rawValue); relaunching")
+        // Waiting for the phone, and it is back.
+        if server == nil, let best = available.first {
+            CoreLog.mirroring.notice("phone reachable over \(best.transport.rawValue); relaunching")
             launch(on: best, generation: generation)
             return
         }
 
-        // The transport under the running server vanished but another is
-        // still there (cable pulled, Wi-Fi still up): move the session now
-        // instead of waiting for it to time out. A new transport appearing
-        // while the current one still works is left alone — switching would
-        // interrupt a session that is fine.
-        if let current = currentTarget, !available.contains(current), let best = available.first {
-            CoreLog.mirroring.info("moving mirroring from \(current.transport.rawValue) to \(best.transport.rawValue)")
+        // The transport under the running server vanished. Move to another
+        // one now rather than waiting for the session to time out. A new
+        // transport appearing while the current one works is left alone —
+        // switching would interrupt a session that is fine.
+        if let current = currentTarget, server != nil, !available.contains(current) {
+            if let best = available.first {
+                CoreLog.mirroring.notice("moving mirroring from \(current.transport.rawValue) to \(best.transport.rawValue)")
+                launch(on: best, generation: generation)
+            } else {
+                waitForPhone()
+            }
+        }
+    }
+
+    // MARK: - Relaunch scheduling
+
+    nonisolated static func relaunchDelay(afterFailures failures: Int) -> TimeInterval {
+        guard failures > 0 else { return 0.5 }
+        return min(pow(2, Double(failures - 1)), 8)
+    }
+
+    private func scheduleRelaunch(after delay: TimeInterval) {
+        pendingRelaunch?.cancel()
+        let gen = generation
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, gen == self.generation, self.state.phase != .idle else { return }
+            self.pendingRelaunch = nil
+            self.relaunch()
+        }
+        pendingRelaunch = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func relaunch() {
+        guard let phoneID = state.phoneID else { return }
+        if let best = targets(phoneID).first {
             launch(on: best, generation: generation)
+        } else {
+            waitForPhone()
+        }
+    }
+
+    /// Keep the session (it keeps retrying its sockets) and relaunch as soon
+    /// as `phonesChanged` sees the phone again.
+    private func waitForPhone() {
+        pendingRelaunch?.cancel()
+        pendingRelaunch = nil
+        server?.stop()
+        server = nil
+        currentTarget = nil
+        if !state.isWaitingForPhone {
+            state.isWaitingForPhone = true
+            CoreLog.mirroring.notice("phone not reachable; waiting for it to return")
+            record(ActivityEvent(kind: .reconnecting, title: "Waiting for the phone",
+                                 detail: "Mirroring resumes when the phone is back over USB or Wi-Fi."))
         }
     }
 
     // MARK: - Server lifecycle
 
     private func launch(on target: Target, generation gen: Int) {
+        pendingRelaunch?.cancel()
+        pendingRelaunch = nil
         server?.stop()
 
-        let configuration = ScrcpyServer.Configuration(serial: target.serial, options: options())
+        let options = self.options()
+        let configuration = ScrcpyServer.Configuration(serial: target.serial, transport: target.transport,
+                                                       options: options)
         let server = ScrcpyServer(adb: adb, configuration: configuration)
         self.server = server
         currentTarget = target
@@ -130,19 +201,21 @@ final class MirroringController {
                     server.stop()
                     return
                 }
+                launchFailures = 0
                 attach(port: port, audio: configuration.options.audio, transport: target.transport)
             } catch is CancellationError {
                 return
             } catch {
-                guard gen == generation else { return }
-                if state.session != nil {
-                    // A relaunch for a session that is still retrying: the
-                    // phone is probably mid-transition. Wait for it rather
-                    // than ending mirroring the user did not ask to end.
-                    waitingForPhone = true
-                    CoreLog.mirroring.info("relaunch failed (\(error.localizedDescription)); waiting for the phone")
-                } else {
+                guard gen == generation, self.server === server else { return }
+                self.server = nil
+                launchFailures += 1
+
+                let limit = state.session == nil ? Self.maxStartAttempts : Self.maxRecoveryAttempts
+                CoreLog.mirroring.error("launch over \(target.transport.rawValue) failed (\(launchFailures)/\(limit)) — \(error.localizedDescription)")
+                if launchFailures >= limit {
                     fail(error.localizedDescription)
+                } else {
+                    scheduleRelaunch(after: Self.relaunchDelay(afterFailures: launchFailures))
                 }
             }
         }
@@ -150,6 +223,7 @@ final class MirroringController {
 
     private func attach(port: UInt16, audio: Bool, transport: PhoneTransport) {
         let isFirstAttach = state.session == nil
+        let wasWaiting = state.isWaitingForPhone
 
         let session = state.session ?? {
             let session = MirroringSession()
@@ -164,16 +238,34 @@ final class MirroringController {
         session.connect(host: StreamConnection.defaultHost, port: port)
 
         state.transport = transport
+        state.isWaitingForPhone = false
         state.phase = .active
+
+        // A relaunched server starts with the phone's screen on and a fresh
+        // control socket; let the owner re-apply session state once input
+        // works again.
+        if !isFirstAttach {
+            let gen = generation
+            Task { [weak self, session] in
+                for _ in 0 ..< 50 where session.control.state != .connected {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                guard let self, gen == self.generation, session.control.state == .connected else { return }
+                self.onSessionResumed()
+            }
+        }
 
         if isFirstAttach {
             record(ActivityEvent(kind: .mirroringStarted, title: "Mirroring started",
+                                 detail: transport == .usb ? "Over USB" : "Over Wi-Fi"))
+        } else if wasWaiting {
+            record(ActivityEvent(kind: .mirroringStarted, title: "Mirroring resumed",
                                  detail: transport == .usb ? "Over USB" : "Over Wi-Fi"))
         }
     }
 
     private func serverExited(generation gen: Int, ranFor: TimeInterval) {
-        guard gen == generation, state.phase == .active, let phoneID = state.phoneID else { return }
+        guard gen == generation, state.phase == .active else { return }
 
         rapidExits = ranFor < 3 ? rapidExits + 1 : 0
         guard rapidExits < 3 else {
@@ -184,18 +276,8 @@ final class MirroringController {
         // Removes the exited server's forward so relaunches do not leak ports.
         server?.stop()
         server = nil
-        record(ActivityEvent(kind: .reconnecting, title: "Reconnecting to the phone screen"))
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            guard let self, gen == self.generation, self.state.phase == .active else { return }
-            if let best = self.targets(phoneID).first {
-                self.launch(on: best, generation: gen)
-            } else {
-                // Keep the session (it is retrying); relaunch when the phone returns.
-                self.waitingForPhone = true
-                CoreLog.mirroring.info("phone not attached; waiting for it to return")
-            }
-        }
+        CoreLog.mirroring.notice("server exited after \(Int(ranFor))s; relaunching")
+        scheduleRelaunch(after: Self.relaunchDelay(afterFailures: 0))
     }
 
     private func fail(_ message: String) {
@@ -205,12 +287,16 @@ final class MirroringController {
     }
 
     private func teardown() {
+        let endedPhone = state.session != nil ? state.phoneID : nil
+        pendingRelaunch?.cancel()
+        pendingRelaunch = nil
         server?.stop()
         server = nil
         currentTarget = nil
-        waitingForPhone = false
+        state.isWaitingForPhone = false
         state.session?.disconnect()
         state.session = nil
         state.transport = nil
+        if let endedPhone { onSessionEnded(endedPhone) }
     }
 }

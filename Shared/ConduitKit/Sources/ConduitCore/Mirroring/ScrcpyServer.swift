@@ -41,6 +41,7 @@ final class ScrcpyServer {
 
     nonisolated struct Configuration: Sendable {
         var serial: String
+        var transport: PhoneTransport = .usb
         var scid: UInt32 = UInt32.random(in: 1 ... 0x7FFF_FFFF)
         var options: MirroringOptions
         var videoSource: VideoSource = .display
@@ -58,9 +59,13 @@ final class ScrcpyServer {
                 "control=\(control)",
                 "tunnel_forward=true",
                 "video_bit_rate=\(options.effectiveBitRate)",
-                "max_size=\(options.effectiveMaxSize)",
+                "max_size=\(options.maxSize(over: transport))",
                 "max_fps=\(options.maxFPS)",
+                // stay_awake only works while the phone is charging; over
+                // Wi-Fi the phone would sleep mid-session and drop the link.
+                // keep_active signals user activity instead, on any transport.
                 "stay_awake=\(options.stayAwake)",
+                "keep_active=\(options.stayAwake)",
             ]
             if case .camera(let facing) = videoSource {
                 args += ["video_source=camera", "camera_facing=\(facing.rawValue)"]

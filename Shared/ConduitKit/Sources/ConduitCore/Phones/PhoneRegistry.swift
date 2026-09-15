@@ -18,14 +18,30 @@ import Foundation
 nonisolated struct AttachedTransport: Sendable, Equatable {
     let device: ADBParsing.Device
     var properties: ADBParsing.PhoneProperties?
+    /// The phone this transport belongs to when Conduit connected it itself
+    /// and so knows before the phone's properties have loaded.
+    var identityHint: String?
+
+    init(device: ADBParsing.Device, properties: ADBParsing.PhoneProperties? = nil, identityHint: String? = nil) {
+        self.device = device
+        self.properties = properties
+        self.identityHint = identityHint
+    }
 
     var transport: PhoneTransport { device.transport }
 
     /// Hardware serial when known, else the best hint available.
     var phoneID: String {
         properties?.hardwareSerial
+            ?? identityHint
             ?? ADBParsing.hardwareSerialHint(fromSerial: device.serial)
             ?? device.serial
+    }
+
+    /// A ready Wi-Fi transport nobody can yet tie to a phone.
+    var isAnonymousWiFi: Bool {
+        device.isReady && transport == .wifi && properties == nil && identityHint == nil
+            && ADBParsing.hardwareSerialHint(fromSerial: device.serial) == nil
     }
 }
 
@@ -42,18 +58,15 @@ nonisolated struct KnownPhone: Codable, Sendable, Equatable {
 enum PhoneRegistry {
 
     static func phones(attached: [AttachedTransport], known: [String: KnownPhone],
-                       preferredID: String?, now: Date = Date()) -> [PhoneDevice] {
+                       preferredID: String?, companionApps: [String: CompanionAppStatus] = [:],
+                       now: Date = Date()) -> [PhoneDevice] {
         var phones: [String: PhoneDevice] = [:]
 
         // A Wi-Fi transport known only as host:port is anonymous until its
         // properties load (a fraction of a second). Listing it meanwhile would
         // flash a second copy of a phone that is already on USB. Transports
         // that cannot load properties — unauthorised, offline — stay visible.
-        let identifiable = attached.filter { transport in
-            !(transport.device.isReady && transport.properties == nil
-              && ADBParsing.hardwareSerialHint(fromSerial: transport.device.serial) == nil
-              && transport.transport == .wifi)
-        }
+        let identifiable = attached.filter { !$0.isAnonymousWiFi }
 
         for (id, group) in Dictionary(grouping: identifiable, by: \.phoneID) {
             let ready = group.filter { $0.device.isReady }
@@ -81,7 +94,8 @@ enum PhoneRegistry {
                 features: features(connected: connection.isConnected,
                                    osVersion: properties?.osVersion ?? remembered?.osVersion),
                 lastSeen: connection.isConnected ? now : remembered?.lastSeen,
-                isPreferred: id == preferredID)
+                isPreferred: id == preferredID,
+                companionApp: companionApps[id] ?? .unknown)
         }
 
         for (id, remembered) in known where phones[id] == nil {

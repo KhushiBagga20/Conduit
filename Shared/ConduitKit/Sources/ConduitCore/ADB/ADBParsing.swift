@@ -116,6 +116,15 @@ nonisolated enum ADBParsing {
         UInt16(output.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    /// Reads `dumpsys package` output for a granted runtime or install
+    /// permission, e.g. `android.permission.WRITE_SECURE_SETTINGS: granted=true`.
+    static func permissionGranted(_ permission: String, in dumpsys: String) -> Bool {
+        dumpsys.split(whereSeparator: \.isNewline).contains { line in
+            let text = line.trimmingCharacters(in: .whitespaces)
+            return text.hasPrefix(permission + ":") && text.contains("granted=true")
+        }
+    }
+
     static func isNoRouteToHost(_ output: String) -> Bool {
         output.lowercased().contains("no route to host")
     }
