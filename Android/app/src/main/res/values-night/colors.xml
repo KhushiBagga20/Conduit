@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="conduit_background">#0D0E12</color>
+    <color name="conduit_accent">#7B87FF</color>
+    <color name="conduit_flow">#3FD0EE</color>
+</resources>

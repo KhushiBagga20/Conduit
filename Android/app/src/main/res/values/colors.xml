@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors DesignTokens.Color.background / accent; used before Compose starts. -->
+    <color name="conduit_background">#F5F6F8</color>
+    <color name="conduit_accent">#4F5DFF</color>
+    <color name="conduit_flow">#1FB5D8</color>
+</resources>
