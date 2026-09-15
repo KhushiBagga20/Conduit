@@ -1,0 +1,44 @@
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Android / Gradle
+.gradle/
+local.properties
+Android/**/build/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.iml
+.idea/
+
+# Signing material, credentials and local overrides — never committed
+*.p12
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+*.keystore
+*.jks
+*.pem
+*.key
+google-services.json
+Mac/Config/Signing.local.xcconfig
+.env
+.env.*

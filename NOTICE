@@ -1,0 +1,11 @@
+Conduit
+Copyright 2026 Khushi Bagga
+
+This product includes software developed as part of the scrcpy project
+(https://github.com/Genymobile/scrcpy), Copyright Genymobile and scrcpy
+contributors, licensed under the Apache License, Version 2.0.
+
+The file `Shared/ConduitKit/Sources/ConduitCore/Resources/scrcpy-server-v4.1`
+is an unmodified binary redistribution of scrcpy-server from the scrcpy v4.1
+release. Conduit's macOS client is an independent implementation written
+against scrcpy's wire protocol; it contains no scrcpy source code.
