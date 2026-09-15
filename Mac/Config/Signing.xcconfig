@@ -1,0 +1,20 @@
+//
+//  Signing.xcconfig
+//
+//  Development signing: automatic, with a personal Apple Development
+//  certificate. Signing with a stable team identity keeps macOS privacy
+//  grants (Local Network, and later Accessibility) across rebuilds.
+//
+//  To build with your own team, create Signing.local.xcconfig next to this
+//  file (it is git-ignored) containing:
+//
+//      DEVELOPMENT_TEAM = YOURTEAMID
+//
+//  Release signing (Developer ID + notarization) is added here later; the
+//  project needs no restructuring for it.
+//
+
+CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM = TKL8XUNNC3
+
+#include? "Signing.local.xcconfig"

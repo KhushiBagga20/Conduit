@@ -136,6 +136,13 @@ public final class ConduitEngine: ConduitCommands {
         mirroring?.restart()
     }
 
+    public func sendMacClipboardToPhone() {
+        guard let session = store.mirroring.session, session.control.state == .connected else { return }
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
+        session.input.sendClipboard(text, paste: false)
+        store.record(ActivityEvent(kind: .clipboardSynced, title: "Clipboard sent to phone"))
+    }
+
     public func updatePreferences(_ change: (inout Preferences) -> Void) {
         var preferences = store.preferences
         change(&preferences)

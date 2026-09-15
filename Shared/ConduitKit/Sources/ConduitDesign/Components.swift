@@ -85,9 +85,11 @@ public struct AvailabilityBadge: View {
 
 public extension View {
     /// Conduit's card surface: a quiet fill and a hairline border on a
-    /// continuous-corner rectangle.
+    /// continuous-corner rectangle. Cards always span their container, so a
+    /// short message never sits in a card narrower than its neighbours.
     func conduitCard(padding: CGFloat = DesignTokens.Spacing.l) -> some View {
         self
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(padding)
             .background(DesignTokens.Color.surface.color,
                         in: RoundedRectangle(cornerRadius: DesignTokens.Radius.large, style: .continuous))

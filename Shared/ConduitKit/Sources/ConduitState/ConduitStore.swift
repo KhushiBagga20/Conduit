@@ -37,6 +37,10 @@ public protocol ConduitCommands: AnyObject {
     /// Restart the server and the session after a failure.
     func restartMirroring()
 
+    /// Put the Mac's clipboard text on the phone's clipboard. Needs an
+    /// active mirroring session.
+    func sendMacClipboardToPhone()
+
     func updatePreferences(_ change: (inout Preferences) -> Void)
     func clearActivity()
 }

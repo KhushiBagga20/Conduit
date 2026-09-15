@@ -1,0 +1,41 @@
+//
+//  Base.xcconfig
+//  Settings for the Conduit Mac app target. Build settings live here rather
+//  than in the project file so they are reviewable in a diff.
+//
+
+PRODUCT_NAME = Conduit
+PRODUCT_BUNDLE_IDENTIFIER = com.khushi.Conduit
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+MACOSX_DEPLOYMENT_TARGET = 15.0
+SDKROOT = macosx
+
+// The settings the scrcpy client was physically tested under; ConduitKit's
+// Package.swift uses the same.
+SWIFT_VERSION = 5.0
+SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor
+SWIFT_APPROACHABLE_CONCURRENCY = YES
+SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES
+
+// Conduit runs adb, so it cannot be sandboxed. The hardened runtime stays
+// on so the same build can be notarized once Developer ID signing is added.
+ENABLE_APP_SANDBOX = NO
+ENABLE_HARDENED_RUNTIME = YES
+
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_FILE = Conduit/Resources/Info.plist
+INFOPLIST_KEY_CFBundleDisplayName = Conduit
+INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.utilities
+INFOPLIST_KEY_LSUIElement = YES
+INFOPLIST_KEY_NSHumanReadableCopyright = Copyright 2026 Khushi Bagga
+INFOPLIST_KEY_NSLocalNetworkUsageDescription = Conduit looks for phones with Wireless debugging on the local network so it can reconnect to them.
+
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor
+COMBINE_HIDPI_IMAGES = YES
+ENABLE_PREVIEWS = YES
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/../Frameworks
+
+#include "Signing.xcconfig"

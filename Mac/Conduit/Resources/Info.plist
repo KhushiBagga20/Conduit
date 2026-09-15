@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Merged with the Info.plist Xcode generates from Config/Base.xcconfig.
+	  Only keys the INFOPLIST_KEY_* settings cannot express live here.
+
+	  _adb-tls-connect._tcp is what phones with Wireless debugging on
+	  advertise; Conduit browses for it to reconnect known phones.
+	-->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_adb-tls-connect._tcp</string>
+	</array>
+</dict>
+</plist>

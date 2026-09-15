@@ -67,6 +67,10 @@ done <<< "$candidates"
 [ "$status" -eq 0 ] && echo "✓ Nothing secret-shaped found"
 
 echo
+echo "== Architecture"
+Scripts/check-architecture.sh || status=1
+
+echo
 echo "== Generated design tokens"
 if python3 Shared/Design/generate.py --check; then
     echo "✓ Up to date"
