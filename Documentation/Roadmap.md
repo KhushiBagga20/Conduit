@@ -29,6 +29,8 @@ a real phone, and a report of what changed and what is still limited.
 | Mirroring continues over Wi-Fi when the cable is pulled, in the Mac app | Done |
 | scrcpy camera source on the test phone | Done |
 | Android interface checked on the phone | Done |
+| Phone screen in its own window while mirroring | Built — hands-on check pending |
+| Redesigned Android interface (live Wi-Fi, battery and setup cards) | Rendered off-device in light and dark — check on the phone pending |
 | Phone screen off ignores touches | Not possible on the test phone — touch vibration is paused instead |
 | Device → Mac clipboard and audio playback checked by a person | Pending |
 

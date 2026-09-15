@@ -78,6 +78,10 @@ cd Android
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+Screens that read the phone are split into a stateful `…Screen()` and a
+stateless `…Content()` that only draws. `ui/screens/Previews.kt` renders the
+content with sample data in Android Studio's preview pane.
+
 ## Shared definitions
 
 - **Design tokens** — edit `Shared/Design/tokens.json`, then run

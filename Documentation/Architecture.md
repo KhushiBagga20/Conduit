@@ -19,7 +19,10 @@ change, not a refactor.
 
 1. **One connection owner.** On the Mac, the menu bar layer owns the only
    connection to a phone. The workspace window is a second interface in the
-   same process. Closing the workspace never closes the connection.
+   same process. Closing the workspace never closes the connection. While
+   mirroring, the phone's screen opens in a window of its own, so the
+   workspace does not need to be on screen; closing that window stops
+   mirroring, not the connection.
 2. **A seam for a future helper.** Both Mac interfaces talk to the owner
    through one state-and-command API (`ConduitStore` + `ConduitCommands`).
    The owner can later move into a helper process behind XPC without
@@ -59,7 +62,8 @@ change, not a refactor.
 ```
 Mac/Conduit (app target)
 ├── App/          composition root — creates the owner, wires scenes
-├── MenuBar/      menu bar interface        ─┐ depend on ConduitState,
+├── MenuBar/      menu bar interface        ─┐
+├── PhoneWindow/  the phone screen window    ─┤ depend on ConduitState,
 └── Workspace/    workspace interface        ─┘ ConduitDesign, ConduitMedia
 
 Shared/ConduitKit (Swift package)
@@ -93,4 +97,5 @@ implementations in two languages stay one protocol.
 `Shared/Design` holds the design tokens — colour, status colours, radii,
 spacing, type roles, icons and terminology — generated into Swift and
 Kotlin, so the three interfaces share one brand system while each keeps its
-platform's conventions.
+platform's conventions. The Android app's dark dotted canvas and gradient
+cards are styling of its own, defined in its theme on top of those tokens.
