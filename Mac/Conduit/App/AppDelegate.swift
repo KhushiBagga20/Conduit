@@ -14,10 +14,10 @@
 //
 //  DOCK ICON
 //
-//  Conduit is a menu bar app (LSUIElement). While the workspace window is
-//  open it becomes a regular app with a Dock icon and a main menu, so it can
-//  be switched to like any other window; when the workspace closes it goes
-//  back to the menu bar.
+//  Conduit is a menu bar app (LSUIElement). While one of its windows — the
+//  workspace or Settings — is open it becomes a regular app with a Dock icon
+//  and a main menu, so it can be switched to like any other app; when the
+//  last one closes it goes back to the menu bar.
 //
 
 import AppKit
@@ -75,12 +75,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// Switches between menu-bar-only and regular-app presentation.
 @MainActor
 enum AppPresentation {
-    static func workspaceDidOpen() {
+    private static var openWindows = 0
+
+    static func windowOpened() {
+        openWindows += 1
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
     }
 
-    static func workspaceDidClose() {
-        NSApp.setActivationPolicy(.accessory)
+    static func windowClosed() {
+        openWindows = max(openWindows - 1, 0)
+        if openWindows == 0 {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }

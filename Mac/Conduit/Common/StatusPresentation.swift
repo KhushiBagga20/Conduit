@@ -8,7 +8,7 @@
 import ConduitDesign
 import ConduitProtocol
 import ConduitState
-import Foundation
+import SwiftUI
 
 extension PhoneDevice {
     var statusTone: StatusTone {
@@ -21,8 +21,7 @@ extension PhoneDevice {
 
     var statusText: String {
         switch connection {
-        case .connected(.usb): "Connected over USB"
-        case .connected(.wifi): "Connected over Wi-Fi"
+        case .connected: "Connected"
         case .unauthorized: "Allow debugging on the phone"
         case .offline: DesignTokens.Term.reconnecting
         case .disconnected:
@@ -31,9 +30,18 @@ extension PhoneDevice {
         }
     }
 
+    /// "USB", "Wi-Fi", or "USB and Wi-Fi".
     var transportSummary: String {
         let names = transports.sorted().map { $0 == .usb ? "USB" : "Wi-Fi" }
-        return names.isEmpty ? "—" : names.joined(separator: " + ")
+        return names.isEmpty ? "Not connected" : names.formatted(.list(type: .and))
+    }
+
+    var androidVersionText: String {
+        osVersion.map { "Android \($0)" } ?? "—"
+    }
+
+    var modelText: String {
+        [manufacturer?.capitalized, model].compactMap { $0 }.joined(separator: " ").nilIfEmpty ?? "—"
     }
 
     func availability(_ feature: FeatureID) -> Availability {
@@ -45,7 +53,7 @@ extension MirroringStatus {
     var tone: StatusTone {
         switch self {
         case .running: .connected
-        case .starting, .connecting, .reconnecting: .working
+        case .starting, .connecting, .reconnecting, .waitingForPhone: .working
         case .failed: .error
         case .idle: .idle
         }
@@ -53,11 +61,12 @@ extension MirroringStatus {
 
     var text: String {
         switch self {
-        case .idle: "Not mirroring"
-        case .starting: "Starting the screen server…"
-        case .connecting: "Connecting to the phone screen…"
-        case .running: "Mirroring"
-        case .reconnecting(let attempt): attempt > 1 ? "Reconnecting… (attempt \(attempt))" : "Reconnecting…"
+        case .idle: "Off"
+        case .starting: "Starting…"
+        case .connecting: "Connecting…"
+        case .running: "On"
+        case .reconnecting(let attempt): attempt > 1 ? "Reconnecting (attempt \(attempt))…" : "Reconnecting…"
+        case .waitingForPhone: "Waiting for the phone…"
         case .failed(let message): message
         }
     }
@@ -100,17 +109,66 @@ extension FeatureID {
         DesignTokens.Feature.all.first { $0.id == rawValue }?.symbol ?? "circle"
     }
 
-    /// What it will take, for features that are not available yet.
-    var plannedDetail: String {
+    /// What the feature does, and what it needs when it is not available.
+    var detail: String {
         switch self {
-        case .trackpad: "Turns the phone into a trackpad for this Mac. Arrives with Conduit for Android."
-        case .camera: "Shows the phone's camera inside Conduit, front or back. Needs Android 12."
-        case .calls: "Answer, decline and place calls from the Mac. Arrives with Conduit for Android; call audio stays on the phone."
-        case .links: "Send a link from the Mac to the phone and back. Arrives with Conduit for Android."
-        case .files: "Send files between the Mac and the phone."
-        case .notifications: "See the phone's notifications on the Mac."
+        case .mirroring: "See the phone's screen on this Mac."
+        case .remoteInput: "Control the phone with this Mac's mouse, trackpad and keyboard while mirroring."
+        case .clipboard: "Copy on one device and paste on the other while mirroring."
+        case .audio: "Hear the phone on this Mac while mirroring. Needs Android 11."
+        case .trackpad: "Turn the phone into a trackpad for this Mac. Arrives with Conduit for Android."
+        case .camera: "Use the phone's cameras inside Conduit. Needs Android 12."
+        case .calls: "Answer, decline and place calls from this Mac. Call audio stays on the phone."
+        case .links: "Send links between this Mac and the phone. Arrives with Conduit for Android."
+        case .files: "Send files between this Mac and the phone."
+        case .notifications: "See the phone's notifications on this Mac."
         case .findMac: "Ring this Mac from the phone. Arrives with Conduit for Android."
-        case .mirroring, .remoteInput, .clipboard, .audio: "Works over USB or Wireless debugging."
         }
     }
+}
+
+extension Availability {
+    var label: String {
+        DesignTokens.availabilityLabel[rawValue] ?? rawValue
+    }
+
+    var symbol: String {
+        switch self {
+        case .available, .active: "checkmark.circle.fill"
+        case .requiresPermission, .requiresSetup: "exclamationmark.circle.fill"
+        case .unsupported: "xmark.circle.fill"
+        case .disabled: "minus.circle"
+        case .planned: "clock"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .available, .active: StatusTone.connected.color
+        case .requiresPermission, .requiresSetup: StatusTone.working.color
+        case .unsupported: StatusTone.error.color
+        case .disabled, .planned: .secondary
+        }
+    }
+}
+
+/// Availability shown the way System Settings shows status: a tinted symbol
+/// and a short secondary label.
+struct AvailabilityLabel: View {
+    let availability: Availability
+
+    var body: some View {
+        Label {
+            Text(availability.label)
+                .foregroundStyle(.secondary)
+        } icon: {
+            Image(systemName: availability.symbol)
+                .foregroundStyle(availability.tint)
+        }
+        .labelStyle(.titleAndIcon)
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

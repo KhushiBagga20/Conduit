@@ -2,14 +2,17 @@
 //  SnapshotRenderer.swift
 //  Conduit
 //
-//  Debug builds only. Renders the interfaces offscreen with preview data
-//  and writes PNGs, so layout can be checked without screen capture:
+//  Debug builds only. Renders the interfaces with preview data and writes
+//  PNGs, so layout can be reviewed without Screen Recording permission:
 //
 //      Conduit.app/Contents/MacOS/Conduit --render-snapshots <directory>
 //
-//  Views are hosted in offscreen windows and drawn with cacheDisplay, which
-//  needs no Screen Recording permission because it only reads Conduit's own
-//  view hierarchy.
+//  MEASURED: `cacheDisplay` and `CALayer.render(in:)` leave list, table and
+//  form content blank, and a transparent window's capture keeps its
+//  transparency. So each view is hosted in an ordinary, opaque window placed
+//  behind every other window and ignoring the mouse, and its pixels are read
+//  back from the window server — which a process may always do for its own
+//  windows.
 //
 
 #if DEBUG
@@ -33,60 +36,63 @@ enum SnapshotRenderer {
             let suffix = appearance == .aqua ? "light" : "dark"
 
             for scenario in ConduitStore.PreviewScenario.allCases {
-                let store = ConduitStore.preview(scenario)
-                render(MenuBarPanel().environment(store).environment(WorkspaceRouter()),
-                       size: CGSize(width: 340, height: 520), appearance: appearance,
+                render(MenuBarPanel().environment(ConduitStore.preview(scenario)).environment(WorkspaceRouter()),
+                       size: CGSize(width: 320, height: 560), appearance: appearance, titled: false,
                        to: directory.appendingPathComponent("menubar-\(scenario.rawValue)-\(suffix).png"))
             }
 
-            // Scroll views and lists do not draw into offscreen captures, so
-            // pages are rendered on their own without their scroll container
-            // (see PageScroll). The sidebar and forms are stock controls.
-            for section in [WorkspaceRouter.Section.overview, .phoneScreen, .devices, .clipboard, .calls] {
-                for scenario in [ConduitStore.PreviewScenario.connected, .empty] {
-                    let store = ConduitStore.preview(scenario)
-                    render(page(section).environment(store).environment(WorkspaceRouter())
-                               .environment(\.isRenderingSnapshot, true),
-                           size: CGSize(width: 860, height: section == .overview ? 1180 : 720), appearance: appearance,
-                           to: directory.appendingPathComponent("page-\(section.rawValue)-\(scenario.rawValue)-\(suffix).png"))
-                }
+            for section in [WorkspaceRouter.Section.overview, .phoneScreen, .clipboard, .activity, .devices, .settings, .calls] {
+                let router = WorkspaceRouter()
+                router.section = section
+                render(WorkspaceView().environment(ConduitStore.preview(.connected)).environment(router),
+                       size: CGSize(width: 1000, height: 700), appearance: appearance, titled: true,
+                       to: directory.appendingPathComponent("workspace-\(section.rawValue)-\(suffix).png"))
             }
         }
+
+        render(WorkspaceView().environment(ConduitStore.preview(.empty)).environment(WorkspaceRouter()),
+               size: CGSize(width: 1000, height: 700), appearance: .aqua, titled: true,
+               to: directory.appendingPathComponent("workspace-overview-empty-light.png"))
         return true
     }
 
-    @ViewBuilder
-    private static func page(_ section: WorkspaceRouter.Section) -> some View {
-        switch section {
-        case .overview: OverviewPage()
-        case .phoneScreen: PhoneScreenPage()
-        case .devices: DevicesPage()
-        case .clipboard: ClipboardPage()
-        default: PlannedFeaturePage(section: section)
-        }
+    /// The window's own pixels from the window server. A process may always
+    /// read its own windows; `CGWindowListCreateImage` is looked up at run
+    /// time because the macOS 15 SDK no longer exposes it to Swift.
+    private static func windowServerImage(of window: NSWindow) -> CGImage? {
+        typealias Capture = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else { return nil }
+        let capture = unsafeBitCast(symbol, to: Capture.self)
+        let includingWindow: UInt32 = 1 << 3
+        let boundsIgnoreFraming: UInt32 = 1 << 0, bestResolution: UInt32 = 1 << 3
+        return capture(.null, includingWindow, UInt32(window.windowNumber), boundsIgnoreFraming | bestResolution)?
+            .takeRetainedValue()
     }
 
-    private static func render<Content: View>(_ view: Content, size: CGSize,
-                                              appearance: NSAppearance.Name, to url: URL) {
-        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size),
-                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+    private static func render<Content: View>(_ view: Content, size: CGSize, appearance: NSAppearance.Name,
+                                              titled: Bool, to url: URL) {
+        let style: NSWindow.StyleMask = titled
+            ? [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            : [.borderless]
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: style,
                               backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: appearance)
         window.isReleasedWhenClosed = false
+        window.ignoresMouseEvents = true
         window.contentView = NSHostingView(rootView: view
-            .frame(width: size.width, height: size.height, alignment: .top)
-            .background(Color(nsColor: .windowBackgroundColor)))
-        window.setFrameOrigin(CGPoint(x: -10_000, y: -10_000))
-        window.orderFrontRegardless()
+            .frame(width: size.width, height: size.height)
+            .background(titled ? Color.clear : Color(nsColor: .windowBackgroundColor)))
 
-        // Let SwiftUI lay out, resolve the toolbar and run appearance updates.
-        RunLoop.current.run(until: Date().addingTimeInterval(1.2))
+        let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        window.setFrameOrigin(CGPoint(x: screen.minX + 20, y: screen.minY + 20))
+        window.orderBack(nil)
 
-        guard let frameView = window.contentView?.superview else { return }
-        let bounds = frameView.bounds
-        if let rep = frameView.bitmapImageRepForCachingDisplay(in: bounds) {
-            frameView.cacheDisplay(in: bounds, to: rep)
-            try? rep.representation(using: .png, properties: [:])?.write(to: url)
+        // Let SwiftUI lay out lists and forms, resolve the toolbar and apply
+        // the appearance.
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+
+        if let image = windowServerImage(of: window) {
+            try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: url)
         }
         window.orderOut(nil)
     }

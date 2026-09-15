@@ -7,6 +7,7 @@
 //    MenuBarExtra  — always present; status, quick actions, activity
 //    Window        — the workspace; opened on demand, closing it changes
 //                    nothing about the connection
+//    Settings      — the standard Settings window (⌘,)
 //
 
 import ConduitState
@@ -33,10 +34,17 @@ struct ConduitApp: App {
                 .environment(model.store)
                 .environment(model.router)
         }
-        .defaultSize(width: 1080, height: 760)
+        .defaultSize(width: 980, height: 700)
         .windowResizability(.contentMinSize)
         .commands {
             WorkspaceCommands(router: model.router)
+        }
+
+        Settings {
+            SettingsWindow()
+                .environment(model.store)
+                .onAppear { AppPresentation.windowOpened() }
+                .onDisappear { AppPresentation.windowClosed() }
         }
     }
 }

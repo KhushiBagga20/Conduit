@@ -3,8 +3,8 @@
 //  Conduit
 //
 //  The live phone screen. Rendering and input are the proven scrcpy client
-//  in ConduitMedia (PhoneScreenView); this page adds the controls around it
-//  and says clearly what is happening when the picture is not there.
+//  in ConduitMedia (PhoneScreenView); this page adds standard toolbar
+//  controls and says clearly what is happening when the picture is not there.
 //
 
 import ConduitDesign
@@ -20,13 +20,14 @@ struct PhoneScreenPage: View {
         let status = store.mirroring.status
 
         ZStack {
-            Color.black.opacity(status.isActive ? 1 : 0)
-                .ignoresSafeArea()
+            if status.isActive {
+                Color.black.ignoresSafeArea()
+            }
 
             if let session = store.mirroring.session, let renderer = session.stream.renderer,
                session.stream.state == .connected {
                 PhoneScreenView(renderer: renderer, input: session.input)
-                    .padding(DesignTokens.Spacing.m)
+                    .padding(8)
             }
 
             if status != .running {
@@ -44,66 +45,51 @@ struct PhoneScreenPage: View {
     private func overlay(for status: MirroringStatus) -> some View {
         switch status {
         case .idle:
-            idleState
-        case .starting, .connecting, .reconnecting:
-            VStack(spacing: DesignTokens.Spacing.m) {
+            if let phone = store.activePhone, phone.connection.isConnected {
+                ContentUnavailableView {
+                    Label("Mirror \(phone.name)", systemImage: "rectangle.on.rectangle")
+                } description: {
+                    Text("See the phone's screen here, and control it with this Mac's mouse, trackpad and keyboard.")
+                } actions: {
+                    Button("Mirror Screen") { store.commands?.startMirroring(phoneID: phone.id) }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                }
+            } else {
+                NoPhoneView(tools: store.tools)
+            }
+
+        case .starting, .connecting, .reconnecting, .waitingForPhone:
+            VStack(spacing: 12) {
                 ProgressView()
                     .controlSize(.large)
                     .tint(.white)
                 Text(status.text)
-                    .font(DesignTokens.Typography.body.font)
-                    .foregroundStyle(.white.opacity(0.8))
+                    .font(.title3)
+                    .foregroundStyle(.white.opacity(0.85))
+                if status == .waitingForPhone {
+                    Text("Mirroring resumes by itself when the phone is back over USB or Wi-Fi.")
+                        .font(.callout)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
             }
+            .environment(\.colorScheme, .dark)
+
         case .failed(let message):
-            VStack(spacing: DesignTokens.Spacing.m) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 30))
-                    .foregroundStyle(DesignTokens.Color.statusError.color)
-                Text("Mirroring stopped")
-                    .font(DesignTokens.Typography.title.font)
+            ContentUnavailableView {
+                Label("Mirroring Stopped", systemImage: "exclamationmark.triangle")
+            } description: {
                 Text(message)
-                    .font(DesignTokens.Typography.body.font)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 420)
+            } actions: {
                 Button("Try Again") { store.commands?.restartMirroring() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
             }
-            .padding(DesignTokens.Spacing.xl)
+
         case .running:
             EmptyView()
         }
-    }
-
-    @ViewBuilder
-    private var idleState: some View {
-        VStack(spacing: DesignTokens.Spacing.l) {
-            PhoneGlyph(tone: store.activePhone?.statusTone ?? .idle, size: 72)
-
-            if let phone = store.activePhone, phone.connection.isConnected {
-                Text("Mirror \(phone.name)")
-                    .font(DesignTokens.Typography.display.font)
-                Text("See the phone's screen here and control it with your mouse, trackpad and keyboard.")
-                    .font(DesignTokens.Typography.body.font)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 400)
-                Button {
-                    store.commands?.startMirroring(phoneID: phone.id)
-                } label: {
-                    Label(DesignTokens.Term.mirrorScreen, systemImage: "play.fill")
-                        .padding(.horizontal, DesignTokens.Spacing.s)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut(.defaultAction)
-            } else {
-                NoPhoneMessage(tools: store.tools)
-                    .frame(maxWidth: 420)
-            }
-        }
-        .padding(DesignTokens.Spacing.xxl)
     }
 
     // MARK: - Toolbar
@@ -112,53 +98,65 @@ struct PhoneScreenPage: View {
     private var toolbar: some ToolbarContent {
         let session = store.mirroring.session
         let controlReady = session?.control.state == .connected
+        let active = store.mirroring.status.isActive
 
-        ToolbarItemGroup(placement: .navigation) {
-            if store.mirroring.status.isActive {
-                StatusDot(store.mirroring.status.tone, size: 8)
-                    .help(store.mirroring.status.text)
-            }
-        }
-
-        ToolbarItemGroup {
-            Button { session?.input.pressBack() } label: { Label("Back", systemImage: "chevron.backward") }
-                .help("Back (or right-click the screen)")
-                .disabled(!controlReady)
-            Button { session?.input.pressHome() } label: { Label("Home", systemImage: "circle") }
-                .help("Home (or middle-click the screen)")
-                .disabled(!controlReady)
-            Button { session?.input.pressRecents() } label: { Label("Recent Apps", systemImage: "square") }
+        ToolbarItem {
+            ControlGroup {
+                Button { session?.input.pressBack() } label: {
+                    Label("Back", systemImage: "chevron.backward")
+                }
+                .help("Back — or right-click the screen")
+                Button { session?.input.pressHome() } label: {
+                    Label("Home", systemImage: "circle")
+                }
+                .help("Home — or middle-click the screen")
+                Button { session?.input.pressRecents() } label: {
+                    Label("Recent Apps", systemImage: "square")
+                }
                 .help("Recent apps")
-                .disabled(!controlReady)
+            }
+            .disabled(!controlReady)
         }
 
-        ToolbarItemGroup {
-            Button { store.commands?.sendMacClipboardToPhone() } label: {
-                Label("Send Clipboard", systemImage: "doc.on.clipboard")
-            }
-            .help("Put the Mac clipboard on the phone (⌘V over the screen also pastes)")
-            .disabled(!controlReady)
-
+        ToolbarItem {
             Button { session?.input.rotateDevice() } label: {
                 Label("Rotate", systemImage: "rotate.right")
             }
             .help("Rotate the phone's screen")
             .disabled(!controlReady)
+        }
 
-            Button { session?.input.toggleDisplayPower() } label: {
-                Label(session?.input.isDisplayOn == false ? "Turn Screen On" : "Turn Screen Off",
-                      systemImage: session?.input.isDisplayOn == false ? "display" : "power")
+        ToolbarItem {
+            Button { store.commands?.sendMacClipboardToPhone() } label: {
+                Label("Send Clipboard", systemImage: "doc.on.clipboard")
             }
-            .help("Turn the phone's own screen off while mirroring keeps working")
+            .help("Put this Mac's clipboard on the phone. ⌘V over the screen also pastes.")
             .disabled(!controlReady)
         }
 
         ToolbarItem {
-            if store.mirroring.status.isActive {
+            Toggle(isOn: Binding(
+                get: { store.mirroring.isPhoneScreenOff },
+                set: { store.commands?.setPhoneScreen(on: !$0) })) {
+                Label("Phone Screen Off", systemImage: "rectangle.portrait.slash")
+            }
+            .help(store.mirroring.isPhoneScreenOff
+                  ? "Turn the phone's own screen back on"
+                  : "Turn the phone's own screen off while mirroring continues")
+            .disabled(!controlReady)
+        }
+
+        ToolbarItem {
+            if active {
                 Button { store.commands?.stopMirroring() } label: {
                     Label("Stop Mirroring", systemImage: "stop.fill")
                 }
                 .help("Stop mirroring")
+            } else if let phone = store.activePhone, phone.connection.isConnected {
+                Button { store.commands?.startMirroring(phoneID: phone.id) } label: {
+                    Label("Mirror Screen", systemImage: "play.fill")
+                }
+                .help("Start mirroring")
             }
         }
     }
@@ -168,6 +166,6 @@ struct PhoneScreenPage: View {
             return store.activePhone?.name ?? ""
         }
         let transport = store.mirroring.transport == .wifi ? "Wi-Fi" : "USB"
-        return "\(session.stream.videoWidth)×\(session.stream.videoHeight) · \(session.stream.codecName ?? "") · \(transport)"
+        return "\(session.stream.videoWidth) × \(session.stream.videoHeight) · \(transport)"
     }
 }

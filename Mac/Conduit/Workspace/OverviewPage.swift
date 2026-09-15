@@ -2,8 +2,8 @@
 //  OverviewPage.swift
 //  Conduit
 //
-//  The phone at a glance: who it is, how it is connected, what it can do
-//  right now, and what just happened.
+//  The phone at a glance, laid out the way System Settings lays out a
+//  device: a header row, then grouped sections of facts.
 //
 
 import ConduitDesign
@@ -16,157 +16,122 @@ struct OverviewPage: View {
     @Environment(WorkspaceRouter.self) private var router
 
     var body: some View {
-        PageScroll {
+        Group {
             if let phone = store.activePhone {
-                hero(phone)
-                quickActions(phone)
-                features(phone)
+                form(phone)
             } else {
-                NoPhoneMessage(tools: store.tools)
-                    .conduitCard(padding: DesignTokens.Spacing.xl)
+                NoPhoneView(tools: store.tools)
             }
-            activity
         }
         .navigationTitle("Overview")
     }
 
-    // MARK: - Hero
-
-    private func hero(_ phone: PhoneDevice) -> some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.l) {
-            PhoneSummary(phone: phone, size: .large)
-
-            Divider()
-
-            HStack(spacing: DesignTokens.Spacing.xxl) {
-                fact("Connection", phone.connection.isConnected ? phone.transportSummary : "—")
-                fact("Mirroring", store.mirroring.status.isActive ? store.mirroring.status.text : "Off")
-                fact("Battery", phone.battery.map { "\($0.level)%\($0.charging ? " · Charging" : "")" } ?? "Needs Conduit for Android")
-                fact("Last seen", phone.connection.isConnected ? "Now"
-                     : phone.lastSeen?.formatted(.relative(presentation: .named)) ?? "—")
+    private func form(_ phone: PhoneDevice) -> some View {
+        Form {
+            Section {
+                header(phone)
             }
-        }
-        .conduitCard(padding: DesignTokens.Spacing.xl)
-    }
 
-    private func fact(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
-            Text(label)
-                .font(DesignTokens.Typography.caption.font)
-                .foregroundStyle(.tertiary)
-            Text(value)
-                .font(DesignTokens.Typography.callout.font)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-    }
-
-    // MARK: - Quick actions
-
-    private func quickActions(_ phone: PhoneDevice) -> some View {
-        let mirroring = store.mirroring.status.isActive
-
-        return VStack(alignment: .leading, spacing: DesignTokens.Spacing.m) {
-            SectionHeading(title: "Quick Actions")
-
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DesignTokens.Spacing.m), count: 3),
-                      spacing: DesignTokens.Spacing.m) {
-                QuickActionTile(title: mirroring ? "Show Screen" : DesignTokens.Term.mirrorScreen,
-                                symbol: "rectangle.on.rectangle",
-                                availability: phone.availability(.mirroring)) {
-                    router.section = .phoneScreen
-                    if !mirroring { store.commands?.startMirroring(phoneID: phone.id) }
+            Section("Connection") {
+                LabeledContent("Status") {
+                    HStack(spacing: 5) {
+                        StatusDot(phone.statusTone, size: 7)
+                        Text(phone.statusText)
+                    }
                 }
-                QuickActionTile(title: DesignTokens.Term.useAsTrackpad, symbol: "hand.point.up.left",
-                                availability: phone.availability(.trackpad)) {}
-                QuickActionTile(title: DesignTokens.Term.useCamera, symbol: "camera",
-                                availability: phone.availability(.camera)) {}
-                QuickActionTile(title: DesignTokens.Term.shareLink, symbol: "link",
-                                availability: phone.availability(.links)) {}
-                QuickActionTile(title: DesignTokens.Term.callPhone, symbol: "phone",
-                                availability: phone.availability(.calls)) {}
-                QuickActionTile(title: DesignTokens.Term.findMac, symbol: "laptopcomputer",
-                                availability: phone.availability(.findMac)) {}
+                LabeledContent("Connected over", value: phone.transportSummary)
+                LabeledContent("Mirroring", value: store.mirroring.status.text)
+                LabeledContent("Model", value: phone.modelText)
+                LabeledContent("Software", value: phone.androidVersionText)
             }
-        }
-    }
 
-    // MARK: - Features
-
-    private func features(_ phone: PhoneDevice) -> some View {
-        let current = FeatureID.allCases.filter { phone.availability($0) != .planned }
-        let planned = FeatureID.allCases.filter { phone.availability($0) == .planned }
-
-        return VStack(alignment: .leading, spacing: DesignTokens.Spacing.m) {
-            SectionHeading(title: "Features", detail: "What works with \(phone.name) right now.")
-
-            VStack(spacing: 0) {
-                ForEach(Array(current.enumerated()), id: \.element) { index, feature in
-                    if index > 0 { Divider().padding(.leading, 44) }
-                    HStack(spacing: DesignTokens.Spacing.m) {
-                        Image(systemName: feature.symbol)
-                            .frame(width: 20)
-                            .foregroundStyle(DesignTokens.Color.accent.color)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(feature.title)
-                                .font(DesignTokens.Typography.body.font)
-                            if !phone.availability(feature).isUsable {
-                                Text(feature.plannedDetail)
-                                    .font(DesignTokens.Typography.caption.font)
+            let current = FeatureID.allCases.filter { phone.availability($0) != .planned }
+            Section("Features") {
+                ForEach(current, id: \.self) { feature in
+                    LabeledContent {
+                        AvailabilityLabel(availability: phone.availability(feature))
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(feature.title)
+                                Text(feature.detail)
+                                    .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
+                        } icon: {
+                            Image(systemName: feature.symbol)
+                                .foregroundStyle(.tint)
                         }
-                        Spacer()
-                        AvailabilityBadge(phone.availability(feature))
                     }
-                    .padding(.vertical, DesignTokens.Spacing.s)
-                }
-
-                if !planned.isEmpty {
-                    Divider()
-                    VStack(alignment: .leading, spacing: DesignTokens.Spacing.s) {
-                        HStack {
-                            Text("Coming to Conduit")
-                                .font(DesignTokens.Typography.headline.font)
-                            AvailabilityBadge(.planned)
-                        }
-                        Text(planned.map(\.title).joined(separator: " · "))
-                            .font(DesignTokens.Typography.callout.font)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, DesignTokens.Spacing.m)
-                    .padding(.bottom, DesignTokens.Spacing.xs)
                 }
             }
-            .conduitCard(padding: DesignTokens.Spacing.m)
+
+            let planned = FeatureID.allCases.filter { phone.availability($0) == .planned }
+            if !planned.isEmpty {
+                Section {
+                    LabeledContent("Planned", value: planned.map(\.title).formatted(.list(type: .and)))
+                } header: {
+                    Text("Coming to Conduit")
+                } footer: {
+                    Text("These arrive with Conduit for Android. Nothing here is a switch that does nothing.")
+                }
+            }
+
+            Section {
+                if store.activity.isEmpty {
+                    Text("Connections, mirroring and clipboard syncs will appear here.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(store.activity.prefix(4)) { event in
+                        LabeledContent {
+                            Text(event.date, format: .dateTime.hour().minute())
+                                .foregroundStyle(.secondary)
+                        } label: {
+                            Label {
+                                Text(event.title)
+                            } icon: {
+                                Image(systemName: event.symbol)
+                                    .foregroundStyle(event.tone.color)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Recent Activity")
+                    Spacer()
+                    if !store.activity.isEmpty {
+                        Button("Show All") { router.section = .activity }
+                            .buttonStyle(.link)
+                            .font(.callout)
+                    }
+                }
+            }
         }
+        .formStyle(.grouped)
     }
 
-    // MARK: - Activity
-
-    private var activity: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.m) {
-            HStack {
-                SectionHeading(title: "Recent Activity")
-                Spacer()
-                if !store.activity.isEmpty {
-                    Button("Show All") { router.section = .activity }
-                        .buttonStyle(.link)
+    private func header(_ phone: PhoneDevice) -> some View {
+        HStack(spacing: 14) {
+            DeviceIcon(tone: phone.statusTone, size: 52)
+            PhoneTitle(phone: phone, large: true)
+            Spacer()
+            if phone.connection.isConnected {
+                if store.mirroring.status.isActive {
+                    Button("Show Screen") { router.section = .phoneScreen }
+                        .controlSize(.large)
+                } else {
+                    Button {
+                        router.section = .phoneScreen
+                        store.commands?.startMirroring(phoneID: phone.id)
+                    } label: {
+                        Label("Mirror Screen", systemImage: "rectangle.on.rectangle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                 }
-            }
-
-            if store.activity.isEmpty {
-                Text("Nothing yet. Connections, mirroring and clipboard syncs will appear here.")
-                    .font(DesignTokens.Typography.callout.font)
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(spacing: DesignTokens.Spacing.s) {
-                    ForEach(store.activity.prefix(5)) { ActivityRow(event: $0) }
-                }
-                .conduitCard(padding: DesignTokens.Spacing.m)
             }
         }
+        .padding(.vertical, 6)
     }
 }

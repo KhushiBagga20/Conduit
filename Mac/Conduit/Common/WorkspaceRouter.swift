@@ -63,7 +63,8 @@ final class WorkspaceRouter {
             }
         }
 
-        var shortcut: KeyEquivalent {
+        /// ⌘1…⌘9. Settings has none here: ⌘, opens the Settings window.
+        var shortcut: KeyEquivalent? {
             switch self {
             case .overview: "1"
             case .phoneScreen: "2"
@@ -74,7 +75,7 @@ final class WorkspaceRouter {
             case .clipboard: "7"
             case .activity: "8"
             case .devices: "9"
-            case .settings: ","
+            case .settings: nil
             }
         }
     }
@@ -88,9 +89,9 @@ struct WorkspaceCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Go") {
-            ForEach(WorkspaceRouter.Section.allCases) { section in
+            ForEach(WorkspaceRouter.Section.allCases.filter { $0.shortcut != nil }) { section in
                 Button(section.title) { router.section = section }
-                    .keyboardShortcut(section.shortcut, modifiers: .command)
+                    .keyboardShortcut(section.shortcut!, modifiers: .command)
             }
         }
     }

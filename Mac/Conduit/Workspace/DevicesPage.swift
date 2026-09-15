@@ -14,92 +14,96 @@ struct DevicesPage: View {
     @Environment(ConduitStore.self) private var store
 
     var body: some View {
-        PageScroll {
-            SectionHeading(title: "Phones",
-                           detail: "Phones connect over USB debugging or Wireless debugging. Conduit remembers them and reconnects over Wi-Fi when it can.")
-
+        Group {
             if store.phones.isEmpty {
-                NoPhoneMessage(tools: store.tools)
-                    .conduitCard(padding: DesignTokens.Spacing.xl)
+                NoPhoneView(tools: store.tools)
             } else {
-                VStack(spacing: DesignTokens.Spacing.m) {
+                Form {
                     ForEach(store.phones) { phone in
-                        row(phone)
+                        section(phone)
+                        companionSection(phone)
                     }
                 }
+                .formStyle(.grouped)
             }
-
-            pairingNote
         }
         .navigationTitle("Devices")
         .toolbar {
-            Button { store.commands?.refreshPhones() } label: {
-                Label("Refresh", systemImage: "arrow.triangle.2.circlepath")
+            ToolbarItem {
+                Button { store.commands?.refreshPhones() } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .help("Look for attached phones again")
             }
-            .help("Look for attached phones again")
         }
     }
 
-    private func row(_ phone: PhoneDevice) -> some View {
-        HStack(alignment: .center, spacing: DesignTokens.Spacing.l) {
-            PhoneSummary(phone: phone)
-
-            VStack(alignment: .trailing, spacing: DesignTokens.Spacing.xs) {
-                if phone.connection.isConnected {
-                    Text(phone.transportSummary)
-                        .font(DesignTokens.Typography.callout.font)
-                        .foregroundStyle(.secondary)
+    @ViewBuilder
+    private func companionSection(_ phone: PhoneDevice) -> some View {
+        Section {
+            switch phone.companionApp {
+            case .unknown:
+                LabeledContent("Conduit for Android", value: phone.connection.isConnected ? "Checking…" : "—")
+            case .notInstalled:
+                LabeledContent {
+                    Text("Not installed").foregroundStyle(.secondary)
+                } label: {
+                    Text("Conduit for Android")
+                    Text("Install it on the phone to keep Wireless debugging on from the phone itself.")
                 }
-                if !phone.detailLine.isEmpty {
-                    Text(phone.detailLine)
-                        .font(DesignTokens.Typography.caption.font)
-                        .foregroundStyle(.tertiary)
+            case .installed(let canManageSettings):
+                LabeledContent {
+                    if canManageSettings {
+                        Label("Allowed", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(StatusTone.connected.color)
+                    } else {
+                        Button("Allow") { store.commands?.allowCompanionSettingsControl(phoneID: phone.id) }
+                            .disabled(!phone.connection.isConnected)
+                    }
+                } label: {
+                    Text("Wireless debugging control")
+                    Text("Lets Conduit for Android turn Wireless debugging on and keep the phone awake while charging, so wireless mirroring stays reachable.")
                 }
             }
+            LabeledContent {
+                AvailabilityLabel(availability: .planned)
+            } label: {
+                Text("Pair with this Mac")
+                Text("For link sharing, calls and using the phone as a trackpad.")
+            }
+        } header: {
+            Text("Conduit for Android")
+        }
+    }
 
-            Menu {
-                if phone.connection.isConnected, store.activePhoneID != phone.id {
+    private func section(_ phone: PhoneDevice) -> some View {
+        Section {
+            HStack(spacing: 12) {
+                DeviceIcon(tone: phone.statusTone, size: 40)
+                PhoneTitle(phone: phone)
+                Spacer()
+                if store.activePhoneID == phone.id {
+                    Text("In Use")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else if phone.connection.isConnected {
                     Button("Use This Phone") { store.commands?.selectPhone(phone.id) }
                 }
-                if phone.isPreferred {
-                    Button("Stop Preferring") { store.commands?.setPreferredPhone(nil) }
-                } else {
-                    Button("Prefer This Phone") { store.commands?.setPreferredPhone(phone.id) }
-                }
-            } label: {
-                Image(systemName: phone.isPreferred ? "star.fill" : "ellipsis.circle")
-                    .foregroundStyle(phone.isPreferred ? DesignTokens.Color.accent.color : .secondary)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(phone.isPreferred ? "Preferred phone" : "More")
-        }
-        .conduitCard(padding: DesignTokens.Spacing.m)
-        .overlay(alignment: .topLeading) {
-            if store.activePhoneID == phone.id, store.phones.count > 1 {
-                RoundedRectangle(cornerRadius: DesignTokens.Radius.large, style: .continuous)
-                    .strokeBorder(DesignTokens.Color.accent.color.opacity(0.6), lineWidth: 1.5)
-            }
-        }
-    }
+            .padding(.vertical, 4)
 
-    private var pairingNote: some View {
-        HStack(alignment: .top, spacing: DesignTokens.Spacing.m) {
-            Image(systemName: "lock.shield")
-                .foregroundStyle(DesignTokens.Color.accent.color)
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxs) {
-                HStack {
-                    Text("Pairing with Conduit for Android")
-                        .font(DesignTokens.Typography.headline.font)
-                    AvailabilityBadge(.planned)
-                }
-                Text("Code pairing between this Mac and the Android app — for calls, link sharing and the trackpad — arrives with Conduit for Android.")
-                    .font(DesignTokens.Typography.callout.font)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            LabeledContent("Connected over", value: phone.connection.isConnected ? phone.transportSummary : "—")
+            LabeledContent("Model", value: phone.modelText)
+            LabeledContent("Software", value: phone.androidVersionText)
+            if !phone.connection.isConnected, let lastSeen = phone.lastSeen {
+                LabeledContent("Last seen", value: lastSeen.formatted(.relative(presentation: .named)))
+            }
+            Toggle(isOn: Binding(
+                get: { phone.isPreferred },
+                set: { store.commands?.setPreferredPhone($0 ? phone.id : nil) })) {
+                Text("Preferred phone")
+                Text("Conduit uses this phone first when more than one is connected.")
             }
         }
-        .conduitCard(padding: DesignTokens.Spacing.m)
     }
 }

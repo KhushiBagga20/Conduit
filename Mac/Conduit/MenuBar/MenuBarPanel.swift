@@ -2,8 +2,8 @@
 //  MenuBarPanel.swift
 //  Conduit
 //
-//  The always-available layer: is the phone here, what is it doing, and the
-//  handful of things worth doing without opening the workspace.
+//  The always-available layer, built like Control Center: a device header,
+//  a grid of toggles that each do something real, and menu rows below.
 //
 //  Kept deliberately small. Anything that needs more than a glance or a
 //  click belongs in the workspace.
@@ -20,240 +20,359 @@ struct MenuBarPanel: View {
     @Environment(ConduitStore.self) private var store
     @Environment(WorkspaceRouter.self) private var router
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.m) {
-            header
-
-            phoneSection
-                .conduitCard(padding: DesignTokens.Spacing.m)
-
-            if store.mirroring.status != .idle {
-                mirroringRow
-            }
-
-            quickActions
-
+        VStack(alignment: .leading, spacing: 8) {
+            deviceHeader
+            controls
+            actions
             if !store.activity.isEmpty {
-                recentActivity
+                recent
             }
-
-            Divider()
-            footer
+            MenuDivider()
+            MenuRow("Conduit Settings…") { showSettings() }
+            MenuRow("Quit Conduit") {
+                AppDelegate.quitRequested = true
+                NSApp.terminate(nil)
+            }
         }
-        .padding(DesignTokens.Spacing.l)
-        .frame(width: 340)
+        .padding(10)
+        .frame(width: 320)
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        HStack(spacing: DesignTokens.Spacing.s) {
-            ConduitMark(size: 22)
-            Text(DesignTokens.Brand.name)
-                .font(DesignTokens.Typography.headline.font)
-            Spacer()
-            Button {
-                open(.settings)
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(.borderless)
-            .help("Settings")
-            .accessibilityLabel("Settings")
-        }
-    }
-
-    // MARK: - Phone
+    // MARK: - Device
 
     @ViewBuilder
-    private var phoneSection: some View {
-        if let phone = store.activePhone {
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.s) {
-                PhoneSummary(phone: phone)
-                if store.connectedPhones.count > 1 {
-                    Picker("Phone", selection: Binding(
-                        get: { store.activePhoneID ?? phone.id },
-                        set: { store.commands?.selectPhone($0) })) {
-                        ForEach(store.connectedPhones) { Text($0.name).tag($0.id) }
+    private var deviceHeader: some View {
+        PanelModule {
+            if let phone = store.activePhone {
+                HStack(spacing: 10) {
+                    DeviceIcon(tone: phone.statusTone, size: 36)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(phone.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        Text(phone.connection.isConnected ? "Connected over \(phone.transportSummary)" : phone.statusText)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
-                    .labelsHidden()
-                    .controlSize(.small)
+                    Spacer(minLength: 0)
+                    if store.connectedPhones.count > 1 {
+                        Menu {
+                            ForEach(store.connectedPhones) { other in
+                                Button(other.name) { store.commands?.selectPhone(other.id) }
+                            }
+                        } label: {
+                            Image(systemName: "chevron.up.chevron.down")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("Choose a phone")
+                    }
+                }
+            } else {
+                HStack(spacing: 10) {
+                    DeviceIcon(tone: .idle, size: 36)
+                        .saturation(0)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(missingADB ? "adb isn't installed" : "No phone connected")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text(missingADB ? "brew install android-platform-tools" : "Connect over USB or Wireless debugging")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
-        } else {
-            NoPhoneMessage(tools: store.tools, compact: true)
         }
     }
 
-    // MARK: - Mirroring
-
-    private var mirroringRow: some View {
-        let status = store.mirroring.status
-        return HStack(spacing: DesignTokens.Spacing.s) {
-            StatusDot(status.tone, size: 7)
-            Text(status.text)
-                .font(DesignTokens.Typography.callout.font)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-            Spacer()
-            if case .failed = status {
-                Button("Try Again") { store.commands?.restartMirroring() }
-                    .controlSize(.small)
-            } else {
-                Button("Stop") { store.commands?.stopMirroring() }
-                    .controlSize(.small)
-            }
-        }
+    private var missingADB: Bool {
+        if case .missing = store.tools.adb { return true }
+        return false
     }
 
-    // MARK: - Quick actions
+    // MARK: - Controls
 
-    private var quickActions: some View {
+    private var controls: some View {
         let phone = store.activePhone
-        let mirroring = store.mirroring.status.isActive
+        let status = store.mirroring.status
         let controlReady = store.mirroring.session?.control.state == .connected
+        let canMirror = phone?.availability(.mirroring).isUsable == true
 
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DesignTokens.Spacing.s), count: 3),
-                         spacing: DesignTokens.Spacing.s) {
-            QuickActionTile(
-                title: mirroring ? "Show Screen" : DesignTokens.Term.mirrorScreen,
-                symbol: "rectangle.on.rectangle",
-                availability: phone?.availability(.mirroring) ?? .requiresSetup) {
-                open(.phoneScreen)
-                if !mirroring { store.commands?.startMirroring(phoneID: phone?.id) }
+        return Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+            GridRow {
+                ControlToggle(
+                    title: "Mirroring",
+                    subtitle: mirroringSubtitle(status),
+                    systemImage: "rectangle.on.rectangle",
+                    isOn: status.isActive,
+                    isEnabled: status.isActive || canMirror
+                ) {
+                    if status.isActive {
+                        store.commands?.stopMirroring()
+                    } else {
+                        store.commands?.startMirroring(phoneID: phone?.id)
+                        open(.phoneScreen)
+                    }
+                }
+
+                ControlToggle(
+                    title: "Phone Screen",
+                    subtitle: !controlReady ? "While mirroring" : (store.mirroring.isPhoneScreenOff ? "Off" : "On"),
+                    systemImage: store.mirroring.isPhoneScreenOff ? "rectangle.portrait.slash" : "rectangle.portrait",
+                    isOn: store.mirroring.isPhoneScreenOff,
+                    isEnabled: controlReady
+                ) {
+                    store.commands?.setPhoneScreen(on: store.mirroring.isPhoneScreenOff)
+                }
             }
+            GridRow {
+                ControlToggle(
+                    title: "Clipboard",
+                    subtitle: store.preferences.clipboardSync ? "Sync on" : "Sync off",
+                    systemImage: "doc.on.clipboard",
+                    isOn: store.preferences.clipboardSync,
+                    isEnabled: true
+                ) {
+                    let enabled = !store.preferences.clipboardSync
+                    store.commands?.updatePreferences { $0.clipboardSync = enabled }
+                }
 
-            QuickActionTile(
-                title: DesignTokens.Term.sendClipboard,
-                symbol: "doc.on.clipboard",
-                availability: controlReady ? .available : .requiresSetup,
-                unavailableLabel: "While mirroring") {
+                ControlToggle(
+                    title: "Wi-Fi",
+                    subtitle: store.preferences.autoConnectWireless ? "Reconnect on" : "Reconnect off",
+                    systemImage: "wifi",
+                    isOn: store.preferences.autoConnectWireless,
+                    isEnabled: true
+                ) {
+                    let enabled = !store.preferences.autoConnectWireless
+                    store.commands?.updatePreferences { $0.autoConnectWireless = enabled }
+                }
+            }
+        }
+    }
+
+    private func mirroringSubtitle(_ status: MirroringStatus) -> String {
+        switch status {
+        case .running: store.mirroring.transport == .wifi ? "On · Wi-Fi" : "On · USB"
+        case .failed: "Stopped"
+        default: status.text
+        }
+    }
+
+    // MARK: - Actions
+
+    private var actions: some View {
+        let status = store.mirroring.status
+        let controlReady = store.mirroring.session?.control.state == .connected
+        let phone = store.activePhone
+
+        return VStack(alignment: .leading, spacing: 0) {
+            MenuDivider()
+            MenuRow("Open Conduit", systemImage: "macwindow") { open(router.section) }
+            if status.isActive {
+                MenuRow("Show Phone Screen", systemImage: "rectangle.on.rectangle") { open(.phoneScreen) }
+            }
+            if case .failed = status {
+                MenuRow("Try Mirroring Again", systemImage: "arrow.clockwise") { store.commands?.restartMirroring() }
+            }
+            MenuRow("Send Clipboard", systemImage: "doc.on.clipboard",
+                    trailing: controlReady ? nil : "While mirroring", isEnabled: controlReady) {
                 store.commands?.sendMacClipboardToPhone()
             }
 
-            QuickActionTile(title: "Trackpad", symbol: "hand.point.up.left",
-                            availability: phone?.availability(.trackpad) ?? .planned) {}
-            QuickActionTile(title: "Camera", symbol: "camera",
-                            availability: phone?.availability(.camera) ?? .planned) {}
-            QuickActionTile(title: DesignTokens.Term.shareLink, symbol: "link",
-                            availability: phone?.availability(.links) ?? .planned) {}
-            QuickActionTile(title: "Call", symbol: "phone",
-                            availability: phone?.availability(.calls) ?? .planned) {}
+            MenuSectionHeader("Coming to Conduit")
+            ForEach(plannedActions, id: \.title) { action in
+                MenuRow(action.title, systemImage: action.symbol,
+                        trailing: (phone?.availability(action.feature) ?? .planned).label, isEnabled: false) {}
+            }
         }
     }
 
-    // MARK: - Activity
+    private var plannedActions: [(title: String, symbol: String, feature: FeatureID)] {
+        [
+            ("Use Phone as Trackpad", "hand.point.up.left", .trackpad),
+            ("Use Phone Camera", "camera", .camera),
+            ("Share Link", "link", .links),
+            ("Call from Phone", "phone", .calls),
+            ("Find My Mac", "laptopcomputer", .findMac),
+        ]
+    }
 
-    private var recentActivity: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-            Text("Recent")
-                .font(DesignTokens.Typography.caption.font.weight(.semibold))
-                .foregroundStyle(.secondary)
+    // MARK: - Recent
+
+    private var recent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MenuDivider()
+            MenuSectionHeader("Recent")
             ForEach(store.activity.prefix(3)) { event in
-                HStack(spacing: DesignTokens.Spacing.s) {
+                HStack(spacing: 8) {
                     Image(systemName: event.symbol)
                         .foregroundStyle(event.tone.color)
                         .frame(width: 16)
                     Text(event.title)
                         .lineLimit(1)
                     Spacer()
-                    Text(event.date, style: .time)
-                        .foregroundStyle(.tertiary)
+                    Text(event.date, format: .dateTime.hour().minute())
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
-                .font(DesignTokens.Typography.callout.font)
+                .font(.system(size: 12))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
             }
         }
     }
 
-    // MARK: - Footer
-
-    private var footer: some View {
-        HStack {
-            Button("Open Conduit") { open(router.section) }
-                .keyboardShortcut("o")
-            Spacer()
-            Button("Quit Conduit") {
-                AppDelegate.quitRequested = true
-                NSApp.terminate(nil)
-            }
-            .keyboardShortcut("q")
-        }
-        .buttonStyle(.borderless)
-        .font(DesignTokens.Typography.callout.font)
-    }
+    // MARK: - Windows
 
     private func open(_ section: WorkspaceRouter.Section) {
         router.section = section
         openWindow(id: WorkspaceRouter.windowID)
-        AppPresentation.workspaceDidOpen()
+        AppPresentation.windowOpened()
+    }
+
+    private func showSettings() {
+        AppPresentation.windowOpened()
+        openSettings()
     }
 }
 
-/// A square action button that says why it cannot be used, instead of
-/// silently doing nothing.
-struct QuickActionTile: View {
+// MARK: - Control Center pieces
+
+/// A translucent rounded module, as Control Center groups its controls.
+struct PanelModule<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ModuleBackground())
+    }
+}
+
+private struct ModuleBackground: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
+            .fill(Color.primary.opacity(0.05))
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+    }
+}
+
+/// A Control Center toggle: a circle that fills with the accent colour when
+/// on, a title and a one-line state.
+struct ControlToggle: View {
     let title: String
-    let symbol: String
-    let availability: Availability
-    var unavailableLabel: String?
+    let subtitle: String
+    let systemImage: String
+    let isOn: Bool
+    let isEnabled: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: DesignTokens.Spacing.xs) {
-                Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .regular))
-                    .frame(height: 20)
-                Text(title)
-                    .font(DesignTokens.Typography.caption.font.weight(.medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                if !availability.isUsable {
-                    Text(unavailableLabel ?? DesignTokens.availabilityLabel[availability.rawValue] ?? "")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.tertiary)
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isOn ? Color.white : Color.primary)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(isOn ? Color.accentColor : Color.primary.opacity(0.1)))
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, minHeight: 62)
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ModuleBackground())
             .contentShape(Rectangle())
         }
-        .buttonStyle(QuickActionButtonStyle(enabled: availability.isUsable))
-        .disabled(!availability.isUsable)
-        .help(availability.isUsable ? title : "\(title) — \(unavailableLabel ?? DesignTokens.availabilityLabel[availability.rawValue] ?? "")")
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.55)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+        .accessibilityValue(subtitle)
     }
 }
 
-private struct QuickActionButtonStyle: ButtonStyle {
-    let enabled: Bool
+/// A row that highlights on hover, like an item in a menu.
+struct MenuRow: View {
+    let title: String
+    var systemImage: String?
+    var trailing: String?
+    var isEnabled = true
+    let action: () -> Void
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(enabled ? AnyShapeStyle(DesignTokens.Color.accent.color) : AnyShapeStyle(.tertiary))
-            .background(
-                RoundedRectangle(cornerRadius: DesignTokens.Radius.medium, style: .continuous)
-                    .fill(configuration.isPressed
-                          ? DesignTokens.Color.accent.color.opacity(0.18)
-                          : DesignTokens.Color.surfaceMuted.color.opacity(enabled ? 1 : 0.6)))
-            .animation(.easeOut(duration: DesignTokens.Motion.quick), value: configuration.isPressed)
+    @State private var hovering = false
+
+    init(_ title: String, systemImage: String? = nil, trailing: String? = nil,
+         isEnabled: Bool = true, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.trailing = trailing
+        self.isEnabled = isEnabled
+        self.action = action
     }
-}
-
-/// Conduit's mark: two linked nodes on the accent gradient.
-struct ConduitMark: View {
-    var size: CGFloat = 22
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-            .fill(LinearGradient(colors: [DesignTokens.Color.accent.color, DesignTokens.Color.flow.color],
-                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-            .frame(width: size, height: size)
-            .overlay {
-                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
-                    .font(.system(size: size * 0.52, weight: .semibold))
-                    .foregroundStyle(.white)
+        let highlighted = hovering && isEnabled
+
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .frame(width: 16)
+                        .foregroundStyle(highlighted ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                }
+                Text(title)
+                Spacer()
+                if let trailing {
+                    Text(trailing)
+                        .foregroundStyle(highlighted ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.tertiary))
+                }
             }
-            .accessibilityHidden(true)
+            .font(.system(size: 13))
+            .foregroundStyle(highlighted ? AnyShapeStyle(.white) : (isEnabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary)))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(highlighted ? Color.accentColor : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .onHover { hovering = $0 }
+    }
+}
+
+struct MenuSectionHeader: View {
+    let title: String
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+    }
+}
+
+struct MenuDivider: View {
+    var body: some View {
+        Divider().padding(.horizontal, 8).padding(.vertical, 4)
     }
 }
