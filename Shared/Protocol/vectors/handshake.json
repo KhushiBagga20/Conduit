@@ -1,0 +1,51 @@
+{
+  "deviceID" : {
+    "id" : "2bad0fd610d99eae443e932a26142bca",
+    "publicKey" : "040217e617f0b6443928278f96999e69a23a4f2c152bdf6d6cdf66e5b80282d4ed194a7debcb97712d2dda3ca85aa8765a56f45fc758599652f2897c65306e5794"
+  },
+  "ephemeral" : {
+    "macPrivate" : "2222222222222222222222222222222222222222222222222222222222222222",
+    "macPublic" : "04d65a93977caa3d1b081852ff57a79e465f1660577304baead505dd3a48589cf350185e895372df6221ea3a137557e473fddb6755f05bd507c3c533fce9c91285",
+    "phonePrivate" : "1111111111111111111111111111111111111111111111111111111111111111",
+    "phonePublic" : "040217e617f0b6443928278f96999e69a23a4f2c152bdf6d6cdf66e5b80282d4ed194a7debcb97712d2dda3ca85aa8765a56f45fc758599652f2897c65306e5794",
+    "sharedSecret" : "ccfc261f58193c98ca4ad4a53bbac6f0ee29bc4d48438090446908622ca79af6"
+  },
+  "hellos" : {
+    "mac" : "7b22646576696365223a7b226964223a226d6163222c226e616d65223a224d6163426f6f6b222c22706c6174666f726d223a226d61636f73227d2c226d6f6465223a2270616972222c2273746570223a2268656c6c6f222c2274797065223a2268616e647368616b65222c2276657273696f6e223a312c2276657273696f6e73223a5b315d7d",
+    "phone" : "7b22646576696365223a7b226964223a2270686f6e65222c226e616d65223a2253323420556c747261222c22706c6174666f726d223a22616e64726f6964227d2c2273746570223a2268656c6c6f222c2274797065223a2268616e647368616b65222c2276657273696f6e73223a5b315d7d"
+  },
+  "note" : "Generated from Conduit for Mac. Both platforms must reproduce every value.",
+  "pairing" : {
+    "code" : "438660",
+    "commitment" : "6fd2fe16716335db45bb546ac46c8af8e4c5b64242c8c3f5dadd1242f25f60a8",
+    "macNonce" : "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "phoneNonce" : "abababababababababababababababababababababababababababababababab"
+  },
+  "sealed" : [
+    {
+      "channel" : 0,
+      "counter" : 0,
+      "payload" : "bfa84e6c8bf4469f4e660bbb0aea6eb734edb87bd5",
+      "plaintext" : "6669727374",
+      "type" : 1
+    },
+    {
+      "channel" : 1,
+      "counter" : 1,
+      "payload" : "bdec3cd39fe0b3ecac42144f000a5c84937e259174bc",
+      "plaintext" : "7365636f6e64",
+      "type" : 0
+    }
+  ],
+  "sessionKeys" : {
+    "macToPhone" : "611de2409e11608942d2160a701963d68c702c47ea7af02e245d87713e8e7bea",
+    "phoneToMac" : "bf120a4479992e6ea919389148118a0837c8d90af917b1cf338e95c45ad64e58"
+  },
+  "statements" : {
+    "authMac" : "636f6e647569742d617574682d76316d6163d2903d0f92727d7f4f8433be0aa1ce7b3692f8f09f0c29b897fe4530e3c91a60",
+    "authPhone" : "636f6e647569742d617574682d763170686f6e65d2903d0f92727d7f4f8433be0aa1ce7b3692f8f09f0c29b897fe4530e3c91a60",
+    "pairMac" : "636f6e647569742d706169722d76316d6163d2903d0f92727d7f4f8433be0aa1ce7b3692f8f09f0c29b897fe4530e3c91a60ababababababababababababababababababababababababababababababababcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "pairPhone" : "636f6e647569742d706169722d763170686f6e65d2903d0f92727d7f4f8433be0aa1ce7b3692f8f09f0c29b897fe4530e3c91a60ababababababababababababababababababababababababababababababababcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+  },
+  "transcript" : "d2903d0f92727d7f4f8433be0aa1ce7b3692f8f09f0c29b897fe4530e3c91a60"
+}

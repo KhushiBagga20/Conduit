@@ -32,7 +32,7 @@ private final class SocketPhone {
     private var macIdentity = Data()
     private var macNonce = Data()
     private var incoming: [HandshakeMessage] = []
-    private var waiting: CheckedContinuation<HandshakeMessage, Never>?
+    private var waiting: CheckedContinuation<HandshakeMessage?, Never>?
 
     var deviceID: String { LinkCrypto.deviceID(forPublicKey: identity.publicKey.x963Representation) }
 
@@ -62,7 +62,7 @@ private final class SocketPhone {
     }
 
     func receiveMacHello(ourHello: Data) async throws {
-        let message = await next()
+        let message = try #require(await next())
         #expect(message.step == .hello)
         let payload = try message.encoded()
         macEphemeral = try #require(message.ephemeralKey.flatMap { Data(base64Encoded: $0) })
@@ -81,7 +81,7 @@ private final class SocketPhone {
         nonceMessage.nonce = nonce.base64EncodedString()
         send(try nonceMessage.encoded(), type: ControlType.handshake.rawValue, sealed: true)
 
-        let reveal = await next()
+        let reveal = try #require(await next())
         #expect(reveal.step == .pairReveal)
         macNonce = try #require(reveal.nonce.flatMap { Data(base64Encoded: $0) })
 
@@ -99,7 +99,10 @@ private final class SocketPhone {
     /// trusts the Mac — then `ready` closes the handshake.
     func awaitReady() async {
         while true {
-            let message = await next()
+            guard let message = await next() else {
+                Issue.record("the Mac never sent ready")
+                return
+            }
             switch message.step {
             case .pairConfirm:
                 let signature = message.signature.flatMap { Data(base64Encoded: $0) }
@@ -160,9 +163,19 @@ private final class SocketPhone {
         }
     }
 
-    private func next() async -> HandshakeMessage {
+    /// The next handshake message, or nil after ten seconds of silence.
+    private func next() async -> HandshakeMessage? {
         if !incoming.isEmpty { return incoming.removeFirst() }
-        return await withCheckedContinuation { continuation in waiting = continuation }
+        return await withCheckedContinuation { continuation in
+            waiting = continuation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, let waiting = self.waiting else { return }
+                    self.waiting = nil
+                    waiting.resume(returning: nil)
+                }
+            }
+        }
     }
 }
 
@@ -175,7 +188,8 @@ struct LinkServerTests {
         let defaults = UserDefaults(suiteName: "conduit.tests.\(UUID().uuidString)")!
         let identity = LinkIdentity(signingKey: P256.Signing.PrivateKey())
         let trust = LinkTrust(defaults: defaults)
-        let server = LinkServer(identity: identity, trust: trust) {
+        // Any free port: Conduit itself may be running and holding 47384.
+        let server = LinkServer(identity: identity, trust: trust, port: 0) {
             identity.deviceInfo(name: "Test Mac", appVersion: "0.1.0")
         }
         server.pairingOpen = true
@@ -195,7 +209,7 @@ struct LinkServerTests {
 
         server.start()
         defer { server.stop() }
-        let port = await listening.value()
+        let port = try #require(await listening.value())
 
         let phone = SocketPhone(port: port)
         phone.start()
@@ -206,13 +220,13 @@ struct LinkServerTests {
         let phoneCode = try await phone.pair()
         await phone.awaitReady()
 
-        let peer = await paired.value()
+        let peer = try #require(await paired.value())
         #expect(peer.id == phone.deviceID)
         #expect(shownCode == phoneCode)
         #expect(trust.trusts(id: phone.deviceID, publicKey: phone.identity.publicKey.x963Representation))
 
         try phone.send(Envelope.command(.linkSend, payload: ["url": .string("https://example.com")]))
-        let envelope = await received.value()
+        let envelope = try #require(await received.value())
         if case .command(_, let action) = envelope.kind {
             #expect(action == .linkSend)
             #expect(envelope.payload?["url"] == .string("https://example.com"))
@@ -222,11 +236,12 @@ struct LinkServerTests {
     }
 }
 
-/// Waits for one value from a callback.
+/// Waits for one value from a callback, and gives up rather than hanging the
+/// whole test run when it never comes.
 @MainActor
 private final class Waiter<Value: Sendable> {
     private var stored: Value?
-    private var waiting: CheckedContinuation<Value, Never>?
+    private var waiting: CheckedContinuation<Value?, Never>?
 
     func send(_ value: Value) {
         if let waiting {
@@ -237,11 +252,20 @@ private final class Waiter<Value: Sendable> {
         }
     }
 
-    func value() async -> Value {
+    func value(within seconds: Double = 10) async -> Value? {
         if let stored {
             self.stored = nil
             return stored
         }
-        return await withCheckedContinuation { continuation in waiting = continuation }
+        return await withCheckedContinuation { continuation in
+            waiting = continuation
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, let waiting = self.waiting else { return }
+                    self.waiting = nil
+                    waiting.resume(returning: nil)
+                }
+            }
+        }
     }
 }

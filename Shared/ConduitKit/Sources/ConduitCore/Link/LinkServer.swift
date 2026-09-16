@@ -26,6 +26,7 @@ final class LinkServer {
     private let identity: LinkIdentity
     private let trust: LinkTrust
     private let device: () -> DeviceInfo
+    private let port: UInt16
 
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: LinkConnection] = [:]
@@ -43,22 +44,23 @@ final class LinkServer {
     var onEnvelope: (Envelope, LinkPeer) -> Void = { _, _ in }
     var onClosed: (LinkPeer?, ProtocolError?) -> Void = { _, _ in }
 
-    init(identity: LinkIdentity, trust: LinkTrust, device: @escaping () -> DeviceInfo) {
+    /// `port` 0 takes any free port.
+    init(identity: LinkIdentity, trust: LinkTrust, port: UInt16 = LinkServer.preferredPort,
+         device: @escaping () -> DeviceInfo) {
         self.identity = identity
         self.trust = trust
+        self.port = port
         self.device = device
     }
 
-    func start() { start(advertising: true) }
+    func start() { start(on: port, advertising: true) }
 
-    private func start(advertising: Bool) {
+    private func start(on port: UInt16, advertising: Bool) {
         guard listener == nil else { return }
         let parameters = NWParameters.tcp
         parameters.includePeerToPeer = true
 
-        let listener = (try? NWListener(using: parameters, on: NWEndpoint.Port(rawValue: Self.preferredPort)!))
-            ?? (try? NWListener(using: parameters))
-        guard let listener else {
+        guard let listener = try? NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port) ?? .any) else {
             CoreLog.engine.error("Conduit Link could not open a port")
             onListening(nil, false)
             return
@@ -85,7 +87,16 @@ final class LinkServer {
                     if advertising, Self.isLocalNetworkRefusal(error) {
                         CoreLog.engine.error("macOS is blocking Conduit Link's Bonjour advert; listening without it")
                         stopListener()
-                        start(advertising: false)
+                        start(on: port, advertising: false)
+                        return
+                    }
+                    // MEASURED: a port already in use does not fail when the
+                    // listener is created, only once it starts. The advert
+                    // carries the real port, so any free one will do.
+                    if port != 0, Self.isAddressInUse(error) {
+                        CoreLog.engine.notice("port \(port) is taken; Conduit Link is taking any free port")
+                        stopListener()
+                        start(on: 0, advertising: advertising)
                         return
                     }
                     CoreLog.engine.error("Conduit Link stopped listening — \(error.localizedDescription)")
@@ -116,6 +127,11 @@ final class LinkServer {
         listener?.stateUpdateHandler = nil
         listener?.cancel()
         listener = nil
+    }
+
+    private static func isAddressInUse(_ error: NWError) -> Bool {
+        if case .posix(let code) = error { return code == .EADDRINUSE }
+        return false
     }
 
     /// `NoAuth` from the DNS responder: the app may not use the local network.
