@@ -15,6 +15,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
@@ -184,6 +186,42 @@ private class WifiLinkMonitor(context: Context) {
         )
     }
 }
+
+/**
+ * The address this phone hands out on its own hotspot, or null when the
+ * hotspot is off. Conduit for Mac reaches the phone at this address once the
+ * Mac joins the hotspot, so showing it makes the connection easy to check.
+ *
+ * Read from the phone's own network interfaces, which needs no permission —
+ * the tethering APIs are for system apps.
+ */
+@Composable
+fun rememberHotspotAddress(): String? {
+    var address by remember { mutableStateOf(hotspotAddress()) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                address = hotspotAddress()
+                delay(3_000)
+            }
+        }
+    }
+    return address
+}
+
+private fun hotspotAddress(): String? = runCatching {
+    NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback && HOTSPOT_INTERFACES.any { prefix -> it.name.startsWith(prefix) } }
+        .flatMap { it.inetAddresses.toList() }
+        .filterIsInstance<Inet4Address>()
+        .firstOrNull { !it.isLoopbackAddress }
+        ?.hostAddress
+}.getOrNull()
+
+/** Names Android and Samsung give the access-point interface. */
+private val HOTSPOT_INTERFACES = listOf("ap", "swlan", "softap", "wlan1", "wl0.1")
 
 @Composable
 fun rememberPhoneIdentity(): PhoneIdentity {

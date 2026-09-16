@@ -36,6 +36,13 @@ public nonisolated enum PhoneConnection: Sendable, Equatable {
     }
 }
 
+/// Reaching a phone over its own hotspot, where Wireless debugging cannot
+/// go: Android turns that off whenever Wi-Fi is off.
+public nonisolated enum HotspotAccess {
+    /// adb's traditional port. The phone only listens on it once armed.
+    public static let port: UInt16 = 5555
+}
+
 /// Conduit for Android on this phone, as seen over adb.
 public nonisolated enum CompanionAppStatus: Sendable, Equatable {
     case unknown
@@ -60,11 +67,17 @@ public nonisolated struct PhoneDevice: Identifiable, Sendable, Equatable {
     public var lastSeen: Date?
     public var isPreferred: Bool
     public var companionApp: CompanionAppStatus
+    /// The phone accepts adb connections over any network it joins, so it
+    /// can be reached over its own hotspot.
+    public var hotspotArmed: Bool
+    /// This Mac is on the phone's hotspot and connected through it.
+    public var isOverHotspot: Bool
 
     public init(id: String, name: String, model: String? = nil, manufacturer: String? = nil,
                 osVersion: String? = nil, connection: PhoneConnection, transports: Set<PhoneTransport> = [],
                 battery: BatteryStatus? = nil, features: [FeatureID: Availability] = [:],
-                lastSeen: Date? = nil, isPreferred: Bool = false, companionApp: CompanionAppStatus = .unknown) {
+                lastSeen: Date? = nil, isPreferred: Bool = false, companionApp: CompanionAppStatus = .unknown,
+                hotspotArmed: Bool = false, isOverHotspot: Bool = false) {
         self.id = id
         self.name = name
         self.model = model
@@ -77,6 +90,8 @@ public nonisolated struct PhoneDevice: Identifiable, Sendable, Equatable {
         self.lastSeen = lastSeen
         self.isPreferred = isPreferred
         self.companionApp = companionApp
+        self.hotspotArmed = hotspotArmed
+        self.isOverHotspot = isOverHotspot
     }
 
     /// "Samsung SM-S928B · Android 16", for secondary lines.

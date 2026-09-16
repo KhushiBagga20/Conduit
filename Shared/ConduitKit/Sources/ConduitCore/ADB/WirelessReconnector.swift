@@ -26,6 +26,9 @@ final class WirelessReconnector {
     /// Wi-Fi transports currently attached for a phone, ready or not.
     var wifiTransports: (String) -> [ADBParsing.Device] = { _ in [] }
     var isMirroring: () -> Bool = { false }
+    /// Phones that armed adb's TCP mode, and the port each listens on, so
+    /// they can be reached over their own hotspot.
+    var hotspotTargets: () -> [String: UInt16] = { [:] }
     var record: (ActivityEvent) -> Void = { _ in }
     /// Called when `adb connect` succeeds, with the new transport's serial and
     /// the phone it belongs to — known before its properties load.
@@ -92,15 +95,41 @@ final class WirelessReconnector {
             let retryingSameAddress = failedTarget[phoneID] == target
             guard !retryingSameAddress || (nextAttempt[phoneID] ?? .distantPast) <= now else { continue }
 
-            connect(phoneID: phoneID, endpoint: endpoint, stale: transports.map(\.serial))
+            let discovered = endpoint
+            connect(phoneID: phoneID, target: target, stale: transports.map(\.serial)) { [weak self] in
+                // The port changes whenever Wireless debugging restarts; the
+                // cached address may simply be old.
+                self?.discovery.refresh(serviceName: discovered.serviceName)
+            }
+        }
+
+        evaluateHotspot(now: now)
+    }
+
+    /// Over a hotspot there is no advert to find: Android turns Wireless
+    /// debugging off with Wi-Fi, and the phone is the network. Knock on the
+    /// gateway, which is the phone itself.
+    private func evaluateHotspot(now: Date) {
+        let armed = hotspotTargets()
+        guard !armed.isEmpty, let gateway = HotspotLink.currentGateway() else { return }
+
+        for (phoneID, port) in armed where isKnownPhone(phoneID) {
+            let transports = wifiTransports(phoneID)
+            guard !transports.contains(where: \.isReady), !inFlight.contains(phoneID) else { continue }
+
+            let target = "\(gateway):\(port)"
+            let retryingSameAddress = failedTarget[phoneID] == target
+            guard !retryingSameAddress || (nextAttempt[phoneID] ?? .distantPast) <= now else { continue }
+
+            connect(phoneID: phoneID, target: target, stale: transports.map(\.serial), verifyIdentity: true)
         }
     }
 
-    private func connect(phoneID: String, endpoint: WirelessEndpoint, stale: [String]) {
+    private func connect(phoneID: String, target: String, stale: [String],
+                         verifyIdentity: Bool = false, refresh: (() -> Void)? = nil) {
         inFlight.insert(phoneID)
         let adb = self.adb
-        let target = "\(endpoint.host):\(endpoint.port)"
-        CoreLog.engine.notice("connecting to a known phone over Wireless debugging (attempt \((failures[phoneID] ?? 0) + 1))")
+        CoreLog.engine.notice("connecting to a known phone at a wireless address (attempt \((failures[phoneID] ?? 0) + 1))")
 
         Task {
             var output = await Task.detached { () -> ADB.Output in
@@ -126,9 +155,21 @@ final class WirelessReconnector {
                 }.value
             }
 
+            // Anyone's gateway can answer on an adb port. Make sure it is
+            // the phone we meant before handing it to the rest of Conduit.
+            var connected = ADBParsing.connectSucceeded(output.combined)
+            if connected, verifyIdentity {
+                let answered = await Task.detached { adb.hardwareSerial(of: target) }.value
+                if answered != phoneID {
+                    CoreLog.engine.notice("another device answered at the gateway; leaving it alone")
+                    await Task.detached { adb.disconnect(target) }.value
+                    connected = false
+                }
+            }
+
             inFlight.remove(phoneID)
-            if ADBParsing.connectSucceeded(output.combined) {
-                CoreLog.engine.notice("connected over Wireless debugging")
+            if connected {
+                CoreLog.engine.notice("connected to a known phone wirelessly")
                 failures[phoneID] = nil
                 nextAttempt[phoneID] = nil
                 failedTarget[phoneID] = nil
@@ -138,10 +179,8 @@ final class WirelessReconnector {
                 failures[phoneID] = count
                 failedTarget[phoneID] = target
                 nextAttempt[phoneID] = Date().addingTimeInterval(Self.backoff(afterFailures: count))
-                CoreLog.engine.error("Wireless debugging connect failed (\(count)) — \(output.combined.trimmingCharacters(in: .whitespacesAndNewlines))")
-                // The port changes whenever Wireless debugging restarts; the
-                // cached address may simply be old.
-                discovery.refresh(serviceName: endpoint.serviceName)
+                CoreLog.engine.error("wireless connect failed (\(count)) — \(output.combined.trimmingCharacters(in: .whitespacesAndNewlines))")
+                refresh?()
             }
         }
     }

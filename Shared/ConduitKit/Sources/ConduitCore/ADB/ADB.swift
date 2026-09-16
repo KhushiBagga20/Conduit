@@ -129,6 +129,27 @@ nonisolated struct ADB: Sendable {
         run(["-s", serial, "shell", "pm", "grant", Self.companionPackage, Self.secureSettingsPermission], timeout: 10).ok
     }
 
+    /// Arm adb's TCP mode, so the phone accepts connections on every network
+    /// it joins — the only way in over its own hotspot, where Android turns
+    /// Wireless debugging off. It lasts until the phone restarts, or
+    /// `restoreUSBMode` closes it.
+    func armTCPMode(serial: String, port: UInt16) -> Bool {
+        ADBParsing.tcpModeArmed(run(["-s", serial, "tcpip", String(port)], timeout: 15).combined, port: port)
+    }
+
+    /// Put adbd back to USB only, closing the TCP port.
+    func restoreUSBMode(serial: String) -> Bool {
+        ADBParsing.usbModeRestored(run(["-s", serial, "usb"], timeout: 15).combined)
+    }
+
+    /// The phone's hardware serial, to check who answered at an address.
+    func hardwareSerial(of serial: String) -> String? {
+        let output = run(["-s", serial, "shell", "getprop", "ro.serialno"], timeout: 8)
+        guard output.ok else { return nil }
+        let text = output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty || text == "null" ? nil : text
+    }
+
     /// Drop a network transport. Harmless for one that is already gone.
     func disconnect(_ serial: String) {
         run(["disconnect", serial], timeout: 5)

@@ -143,6 +143,18 @@ nonisolated enum ADBParsing {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    /// `adb tcpip 5555` answers "restarting in TCP mode port: 5555".
+    static func tcpModeArmed(_ output: String, port: UInt16) -> Bool {
+        output.contains("restarting in TCP mode port: \(port)")
+    }
+
+    /// `adb usb` answers "restarting in USB mode"; a phone already in USB
+    /// mode says so too.
+    static func usbModeRestored(_ output: String) -> Bool {
+        let text = output.lowercased()
+        return text.contains("restarting in usb mode") || text.contains("already in usb mode")
+    }
+
     static func isNoRouteToHost(_ output: String) -> Bool {
         output.lowercased().contains("no route to host")
     }

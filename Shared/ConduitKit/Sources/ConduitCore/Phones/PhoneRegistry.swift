@@ -53,13 +53,16 @@ nonisolated struct KnownPhone: Codable, Sendable, Equatable {
     var manufacturer: String?
     var osVersion: String?
     var lastSeen: Date
+    /// The port adb's TCP mode was armed on, so the phone can be reached
+    /// over its own hotspot. Nil when it was never armed or was turned off.
+    var hotspotPort: UInt16?
 }
 
 enum PhoneRegistry {
 
     static func phones(attached: [AttachedTransport], known: [String: KnownPhone],
                        preferredID: String?, companionApps: [String: CompanionAppStatus] = [:],
-                       now: Date = Date()) -> [PhoneDevice] {
+                       gateway: String? = nil, now: Date = Date()) -> [PhoneDevice] {
         var phones: [String: PhoneDevice] = [:]
 
         // A Wi-Fi transport known only as host:port is anonymous until its
@@ -95,7 +98,9 @@ enum PhoneRegistry {
                                    osVersion: properties?.osVersion ?? remembered?.osVersion),
                 lastSeen: connection.isConnected ? now : remembered?.lastSeen,
                 isPreferred: id == preferredID,
-                companionApp: companionApps[id] ?? .unknown)
+                companionApp: companionApps[id] ?? .unknown,
+                hotspotArmed: remembered?.hotspotPort != nil,
+                isOverHotspot: gateway.map { router in ready.contains { $0.device.serial.hasPrefix("\(router):") } } ?? false)
         }
 
         for (id, remembered) in known where phones[id] == nil {
@@ -105,7 +110,8 @@ enum PhoneRegistry {
                 connection: .disconnected,
                 features: features(connected: false, osVersion: remembered.osVersion),
                 lastSeen: remembered.lastSeen,
-                isPreferred: id == preferredID)
+                isPreferred: id == preferredID,
+                hotspotArmed: remembered.hotspotPort != nil)
         }
 
         // Connected first, then preferred, then most recently seen.

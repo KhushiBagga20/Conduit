@@ -32,7 +32,10 @@ change, not a refactor.
    - **adb / scrcpy** carries screen mirroring, remote input, audio and
      clipboard. These need shell-level privileges on the phone that an
      ordinary Android app cannot have, so they require Wireless debugging
-     (or USB debugging).
+     (or USB debugging). Wireless debugging itself needs a Wi-Fi network,
+     which a phone sharing its own hotspot does not have; for that case
+     Conduit arms adb's TCP port instead and reaches the phone at the
+     hotspot's gateway.
    - **Conduit Link**, Conduit's own authenticated protocol between the
      Android app and the Mac, carries device state, commands and events:
      battery, network, link sharing, calls, phone-as-trackpad, and more. It

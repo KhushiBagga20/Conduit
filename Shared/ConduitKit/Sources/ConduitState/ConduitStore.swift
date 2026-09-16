@@ -48,6 +48,11 @@ public protocol ConduitCommands: AnyObject {
     /// settings on this phone. Granted over adb; the user asks for it.
     func allowCompanionSettingsControl(phoneID: String)
 
+    /// Let this phone be reached over its own hotspot, where Wireless
+    /// debugging cannot go, and stop again.
+    func prepareHotspotConnection(phoneID: String)
+    func stopHotspotConnection(phoneID: String)
+
     func updatePreferences(_ change: (inout Preferences) -> Void)
     func clearActivity()
 }

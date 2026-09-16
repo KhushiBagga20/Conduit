@@ -45,6 +45,7 @@ import com.khushi.conduit.core.protocol.Availability
 import com.khushi.conduit.core.protocol.FeatureId
 import com.khushi.conduit.system.PhoneSetup
 import com.khushi.conduit.system.SystemScreen
+import com.khushi.conduit.system.rememberHotspotAddress
 import com.khushi.conduit.system.rememberPhoneSettings
 import com.khushi.conduit.ui.LocalAppPreferences
 import com.khushi.conduit.ui.ThemeMode
@@ -66,6 +67,7 @@ import com.khushi.conduit.ui.components.featuresAvailableToday
 import com.khushi.conduit.ui.components.icon
 import com.khushi.conduit.ui.components.title
 import com.khushi.conduit.ui.theme.LocalCanvas
+import com.khushi.conduit.ui.theme.LocalStatusColors
 
 @Composable
 private fun ScreenColumn(title: String, content: @Composable ColumnScope.() -> Unit) {
@@ -87,11 +89,15 @@ private fun ScreenColumn(title: String, content: @Composable ColumnScope.() -> U
 @Composable
 fun MacsScreen() {
     val context = LocalContext.current
-    MacsContent(phone = rememberPhoneSettings(), onOpen = { it.open(context) })
+    MacsContent(
+        phone = rememberPhoneSettings(),
+        hotspotAddress = rememberHotspotAddress(),
+        onOpen = { it.open(context) },
+    )
 }
 
 @Composable
-fun MacsContent(phone: PhoneSetup, onOpen: (SystemScreen) -> Unit) {
+fun MacsContent(phone: PhoneSetup, hotspotAddress: String?, onOpen: (SystemScreen) -> Unit) {
     ScreenColumn("Macs") {
         DottedEmptyState(
             title = "No paired Macs",
@@ -112,6 +118,54 @@ fun MacsContent(phone: PhoneSetup, onOpen: (SystemScreen) -> Unit) {
             icon = Icons.Rounded.DeveloperMode,
             modifier = Modifier.fillMaxWidth(),
         ) { onOpen(SystemScreen.DEVELOPER_OPTIONS) }
+
+        SectionLabel("Away from Wi-Fi")
+        HotspotCard(hotspotAddress, onOpen)
+    }
+}
+
+/**
+ * Using the phone's own hotspot, for when there is no Wi-Fi network to
+ * share. Android turns Wireless debugging off whenever Wi-Fi is off, so
+ * Conduit for Mac opens adb's own port instead — from the Mac, while the
+ * phone is still connected.
+ */
+@Composable
+private fun HotspotCard(hotspotAddress: String?, onOpen: (SystemScreen) -> Unit) {
+    val canvas = LocalCanvas.current
+    PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBubble(Icons.Rounded.WifiTethering)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Use this phone's hotspot", color = canvas.content, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    if (hotspotAddress != null) "Hotspot on at $hotspotAddress" else "Hotspot off",
+                    color = if (hotspotAddress != null) LocalStatusColors.current.connected else canvas.contentSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        HotspotStep(1, "On the Mac, while this phone is connected, open Conduit → Devices → Get Ready.")
+        HotspotStep(2, "Turn this phone's hotspot on.")
+        HotspotStep(3, "Join the Mac to the hotspot. Conduit finds the phone by itself.")
+        Spacer(Modifier.height(12.dp))
+        PillButton("Open hotspot settings", modifier = Modifier.fillMaxWidth()) { onOpen(SystemScreen.HOTSPOT) }
+    }
+}
+
+@Composable
+private fun HotspotStep(number: Int, text: String) {
+    val canvas = LocalCanvas.current
+    Row(Modifier.padding(vertical = 4.dp)) {
+        Text(
+            "$number",
+            color = canvas.contentSecondary,
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.width(20.dp),
+        )
+        Text(text, color = canvas.contentSecondary, style = MaterialTheme.typography.bodySmall)
     }
 }
 

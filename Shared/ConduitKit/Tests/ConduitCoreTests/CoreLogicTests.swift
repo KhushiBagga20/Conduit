@@ -111,6 +111,16 @@ struct ADBParsingTests {
         #expect(ADBParsing.shellQuoted("it's") == #"'it'\''s'"#)
     }
 
+    @Test("adb TCP mode, armed and closed")
+    func tcpMode() {
+        #expect(ADBParsing.tcpModeArmed("restarting in TCP mode port: 5555\n", port: 5555))
+        #expect(!ADBParsing.tcpModeArmed("restarting in TCP mode port: 5555\n", port: 5556))
+        #expect(!ADBParsing.tcpModeArmed("error: no devices/emulators found\n", port: 5555))
+        #expect(ADBParsing.usbModeRestored("restarting in USB mode\n"))
+        #expect(ADBParsing.usbModeRestored("already in USB mode\n"))
+        #expect(!ADBParsing.usbModeRestored("error: device offline\n"))
+    }
+
     @Test("the touch guard joins the accessibility services already on, once")
     func accessibilityServices() {
         let guardService = PhoneTouchGuard.service
@@ -169,6 +179,29 @@ struct PhoneRegistryTests {
         let phones = PhoneRegistry.phones(attached: [hinted], known: known, preferredID: nil)
         #expect(phones.count == 1 && phones[0].name == "S24 Ultra" && phones[0].connection == .connected(.wifi))
         #expect(PhoneRegistry.targets(for: "RZCY60JS0PM", attached: [hinted]).map(\.transport) == [.wifi])
+    }
+
+    @Test("a phone armed for its hotspot, reached at the Mac's gateway")
+    func hotspot() {
+        let armed = ["RZCY60JS0PM": KnownPhone(id: "RZCY60JS0PM", name: "S24 Ultra", osVersion: "16",
+                                               lastSeen: Date(), hotspotPort: HotspotAccess.port)]
+        let overHotspot = AttachedTransport(device: .init(serial: "192.168.43.1:5555", state: "device", model: nil),
+                                            properties: properties)
+        let hotspot = PhoneRegistry.phones(attached: [overHotspot], known: armed, preferredID: nil,
+                                           gateway: "192.168.43.1")
+        #expect(hotspot.count == 1)
+        #expect(hotspot[0].hotspotArmed && hotspot[0].isOverHotspot)
+        #expect(hotspot[0].connection == .connected(.wifi))
+
+        // The same phone on a home network is armed, but not on a hotspot.
+        let overWiFi = AttachedTransport(device: .init(serial: "192.168.1.20:45423", state: "device", model: nil),
+                                         properties: properties)
+        let home = PhoneRegistry.phones(attached: [overWiFi], known: armed, preferredID: nil, gateway: "192.168.1.1")
+        #expect(home[0].hotspotArmed && !home[0].isOverHotspot)
+
+        // A phone that was never armed offers nothing to knock on.
+        let plain = ["RZCY60JS0PM": KnownPhone(id: "RZCY60JS0PM", name: "S24 Ultra", lastSeen: Date())]
+        #expect(PhoneRegistry.phones(attached: [], known: plain, preferredID: nil)[0].hotspotArmed == false)
     }
 
     @Test("remembered phones appear disconnected; unauthorised ones say so")

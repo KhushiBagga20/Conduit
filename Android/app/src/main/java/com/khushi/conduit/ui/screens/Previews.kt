@@ -45,7 +45,11 @@ private fun HomeLightPreview() = HomeSample(dark = false)
 private fun MacsPreview() {
     ConduitTheme(darkTheme = true) {
         AppFrame(current = Destination.MACS, onSelect = {}) {
-            MacsContent(phone = PhoneSetupSample(wirelessDebugging = false), onOpen = {})
+            MacsContent(
+                phone = PhoneSetupSample(wirelessDebugging = false),
+                hotspotAddress = "192.168.43.1",
+                onOpen = {},
+            )
         }
     }
 }

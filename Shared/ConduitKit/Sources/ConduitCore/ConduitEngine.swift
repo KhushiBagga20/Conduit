@@ -113,6 +113,9 @@ public final class ConduitEngine: ConduitCommands {
             self?.attached.values.filter { $0.phoneID == id && $0.transport == .wifi }.map(\.device) ?? []
         }
         reconnector.isMirroring = { [weak self] in self?.store.mirroring.status.isActive ?? false }
+        reconnector.hotspotTargets = { [weak self] in
+            self?.known.compactMapValues(\.hotspotPort) ?? [:]
+        }
         reconnector.record = { [weak self] event in self?.store.record(event) }
         reconnector.onConnected = { [weak self] serial, phoneID in self?.wifiTransportConnected(serial, phoneID: phoneID) }
         self.reconnector = reconnector
@@ -259,6 +262,47 @@ public final class ConduitEngine: ConduitCommands {
         Task { await settingsGuard.restoreAll(phoneID: phoneID, serial: serial) }
     }
 
+    /// Arm adb's TCP mode so this phone can be reached over its own hotspot.
+    public func prepareHotspotConnection(phoneID: String) {
+        guard let adb, let serial = PhoneRegistry.targets(for: phoneID, attached: Array(attached.values)).first?.serial
+        else {
+            store.record(ActivityEvent(kind: .error, title: "Connect the phone first",
+                                       detail: "Plug it in, or connect it over Wi-Fi, then get it ready for its hotspot."))
+            return
+        }
+        let port = HotspotLink.defaultPort
+        Task {
+            let armed = await Task.detached { adb.armTCPMode(serial: serial, port: port) }.value
+            guard armed else {
+                store.record(ActivityEvent(kind: .error, title: "Couldn't get the phone ready for its hotspot",
+                                           detail: "The phone refused to open its adb port."))
+                return
+            }
+            known[phoneID]?.hotspotPort = port
+            saveKnownPhones()
+            publishPhones()
+            store.record(ActivityEvent(kind: .phoneConnected, title: "Ready for this phone's hotspot",
+                                       detail: "Turn the phone's hotspot on and join this Mac to it."))
+        }
+    }
+
+    /// Close the phone's adb port again.
+    public func stopHotspotConnection(phoneID: String) {
+        known[phoneID]?.hotspotPort = nil
+        saveKnownPhones()
+        publishPhones()
+
+        guard let adb, let serial = PhoneRegistry.targets(for: phoneID, attached: Array(attached.values)).first?.serial
+        else { return }
+        Task {
+            let closed = await Task.detached { adb.restoreUSBMode(serial: serial) }.value
+            store.record(closed
+                ? ActivityEvent(kind: .phoneDisconnected, title: "The phone's adb port is closed again")
+                : ActivityEvent(kind: .error, title: "Couldn't close the phone's adb port",
+                                detail: "It closes by itself when the phone restarts."))
+        }
+    }
+
     public func allowCompanionSettingsControl(phoneID: String) {
         guard let adb, let serial = PhoneRegistry.targets(for: phoneID, attached: Array(attached.values)).first?.serial
         else { return }
@@ -382,9 +426,18 @@ public final class ConduitEngine: ConduitCommands {
     }
 
     private func remember(_ properties: ADBParsing.PhoneProperties) {
-        known[properties.hardwareSerial] = KnownPhone(
-            id: properties.hardwareSerial, name: properties.name, model: properties.model,
-            manufacturer: properties.manufacturer, osVersion: properties.osVersion, lastSeen: Date())
+        var phone = known[properties.hardwareSerial]
+            ?? KnownPhone(id: properties.hardwareSerial, name: properties.name, lastSeen: Date())
+        phone.name = properties.name
+        phone.model = properties.model
+        phone.manufacturer = properties.manufacturer
+        phone.osVersion = properties.osVersion
+        phone.lastSeen = Date()
+        known[properties.hardwareSerial] = phone
+        saveKnownPhones()
+    }
+
+    private func saveKnownPhones() {
         if let data = try? JSONEncoder().encode(Array(known.values)) {
             defaults.set(data, forKey: Key.knownPhones)
         }
@@ -393,7 +446,8 @@ public final class ConduitEngine: ConduitCommands {
     private func publishPhones() {
         store.phones = PhoneRegistry.phones(attached: Array(attached.values), known: known,
                                             preferredID: store.preferences.preferredPhoneID,
-                                            companionApps: companionApps)
+                                            companionApps: companionApps,
+                                            gateway: HotspotLink.currentGateway())
 
         // Keep the user's choice while it exists; otherwise prefer the
         // preferred phone, then any connected phone, then anything known.

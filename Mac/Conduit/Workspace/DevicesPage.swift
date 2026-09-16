@@ -21,6 +21,7 @@ struct DevicesPage: View {
                 Form {
                     ForEach(store.phones) { phone in
                         section(phone)
+                        hotspotSection(phone)
                         companionSection(phone)
                     }
                 }
@@ -36,6 +37,43 @@ struct DevicesPage: View {
                 .help("Look for attached phones again")
             }
         }
+    }
+
+    /// Reaching the phone over its own hotspot, for when there is no Wi-Fi
+    /// network to share.
+    @ViewBuilder
+    private func hotspotSection(_ phone: PhoneDevice) -> some View {
+        Section {
+            LabeledContent {
+                if phone.hotspotArmed {
+                    Button("Turn Off") { store.commands?.stopHotspotConnection(phoneID: phone.id) }
+                } else {
+                    Button("Get Ready") { store.commands?.prepareHotspotConnection(phoneID: phone.id) }
+                        .disabled(!phone.connection.isConnected)
+                }
+            } label: {
+                Text("Connect over this phone's hotspot")
+                Text(hotspotStatus(phone))
+            }
+
+            if phone.hotspotArmed && !phone.isOverHotspot {
+                LabeledContent("Next") {
+                    Text("Turn on the phone's hotspot, then join this Mac to it")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Anywhere")
+        } footer: {
+            Label("Android turns Wireless debugging off whenever Wi-Fi is off, so a hotspot needs adb's own port instead. While this is on, the phone accepts adb connections on port \(String(HotspotAccess.port)) over every network it joins, until you turn it off or restart the phone. A computer it has never allowed still has to be allowed on the phone.",
+                  systemImage: "exclamationmark.shield")
+        }
+    }
+
+    private func hotspotStatus(_ phone: PhoneDevice) -> String {
+        if phone.isOverHotspot { return "Connected through the phone's hotspot" }
+        if phone.hotspotArmed { return "Ready — the phone is listening on port \(String(HotspotAccess.port))" }
+        return "Off. Wireless debugging needs a Wi-Fi network both devices are on."
     }
 
     @ViewBuilder
