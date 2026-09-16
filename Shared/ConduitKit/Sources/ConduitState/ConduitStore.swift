@@ -53,6 +53,13 @@ public protocol ConduitCommands: AnyObject {
     func prepareHotspotConnection(phoneID: String)
     func stopHotspotConnection(phoneID: String)
 
+    /// Conduit Link: pairing with a phone, and forgetting one.
+    func openLinkPairing()
+    func closeLinkPairing()
+    func confirmLinkPairing()
+    func rejectLinkPairing()
+    func forgetLinkedPhone(id: String)
+
     func updatePreferences(_ change: (inout Preferences) -> Void)
     func clearActivity()
 }
@@ -86,6 +93,7 @@ public final class ConduitStore {
     public package(set) var phones: [PhoneDevice] = []
     public package(set) var activePhoneID: String?
     public let mirroring = MirroringState()
+    public let link = LinkState()
     public package(set) var activity: [ActivityEvent] = []
     public package(set) var tools = ToolStatus()
     public package(set) var preferences = Preferences()

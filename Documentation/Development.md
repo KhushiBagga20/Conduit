@@ -82,6 +82,19 @@ Screens that read the phone are split into a stateful `…Screen()` and a
 stateless `…Content()` that only draws. `ui/screens/Previews.kt` renders the
 content with sample data in Android Studio's preview pane.
 
+### Conduit Link on this Mac
+
+Conduit listens on port 47384 and advertises `_conduit._tcp` so phones can
+find it. macOS refuses the advert until Conduit is allowed in **System
+Settings → Privacy & Security → Local Network**; Conduit keeps the port open
+either way and says so in Devices, because a phone can also be told where to
+find the Mac over adb.
+
+```bash
+lsof -nP -iTCP:47384 -sTCP:LISTEN     # the listener
+dns-sd -B _conduit._tcp               # the advert, once allowed
+```
+
 ## Shared definitions
 
 - **Design tokens** — edit `Shared/Design/tokens.json`, then run

@@ -15,7 +15,7 @@ struct DevicesPage: View {
 
     var body: some View {
         Group {
-            if store.phones.isEmpty {
+            if store.phones.isEmpty && store.link.phones.isEmpty {
                 NoPhoneView(tools: store.tools)
             } else {
                 Form {
@@ -24,8 +24,16 @@ struct DevicesPage: View {
                         hotspotSection(phone)
                         companionSection(phone)
                     }
+                    linkSection
                 }
                 .formStyle(.grouped)
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { store.link.pairingRequest != nil },
+            set: { if !$0 { store.commands?.rejectLinkPairing() } })) {
+            if let request = store.link.pairingRequest {
+                PairingSheet(request: request)
             }
         }
         .navigationTitle("Devices")
@@ -37,6 +45,54 @@ struct DevicesPage: View {
                 .help("Look for attached phones again")
             }
         }
+    }
+
+    /// Conduit Link: the channel to Conduit for Android, for everything that
+    /// does not need developer options.
+    @ViewBuilder
+    private var linkSection: some View {
+        Section {
+            if store.link.phones.isEmpty {
+                Text("No phones are linked yet.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(store.link.phones) { phone in
+                LabeledContent {
+                    Button("Unlink") { store.commands?.forgetLinkedPhone(id: phone.id) }
+                } label: {
+                    Text(phone.name)
+                    HStack(spacing: 5) {
+                        StatusDot(phone.isConnected ? .connected : .idle, size: 7)
+                        Text(phone.isConnected ? "Connected" : "Last seen \(phone.lastSeen.formatted(.relative(presentation: .named)))")
+                    }
+                }
+            }
+
+            LabeledContent {
+                if store.link.isPairingOpen {
+                    Button("Stop") { store.commands?.closeLinkPairing() }
+                } else {
+                    Button("Add Phone") { store.commands?.openLinkPairing() }
+                        .disabled(!store.link.isListening)
+                }
+            } label: {
+                Text("Add a phone")
+                Text(linkStatus)
+            }
+        } header: {
+            Text("Conduit Link")
+        } footer: {
+            Text("Links, files, notifications and calls travel over Conduit Link, which needs no developer options and works on any network you share — including the phone's hotspot. Mirroring keeps using adb.")
+        }
+    }
+
+    private var linkStatus: String {
+        guard store.link.isListening else { return "Conduit Link is not listening on this Mac." }
+        if store.link.isPairingOpen { return "In Conduit for Android, choose Add Mac, then compare the six digits." }
+        if !store.link.isAdvertising {
+            return "Listening, but macOS is blocking the advert phones look for. Allow Conduit under Privacy & Security → Local Network."
+        }
+        return "Ready for phones on this network."
     }
 
     /// Reaching the phone over its own hotspot, for when there is no Wi-Fi

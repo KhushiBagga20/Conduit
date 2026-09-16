@@ -29,7 +29,8 @@ import android.view.accessibility.AccessibilityManager
  * service on, renews the lease while the screen is off, and turns the service
  * off afterwards. It stands down by itself when the lease runs out, when the
  * power button is pressed, or when it was turned on by hand. It reads nothing
- * on the screen and asks for no accessibility events.
+ * on the screen: it asks only for the two events that say a touch started
+ * and ended, which Android requires before it will route touches here.
  */
 class TouchGuardService : AccessibilityService() {
 

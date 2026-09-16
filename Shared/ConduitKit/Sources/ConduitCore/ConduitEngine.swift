@@ -32,6 +32,12 @@ public final class ConduitEngine: ConduitCommands {
     private var mirroring: MirroringController?
     private var settingsGuard: PhoneSettingsGuard?
     private var touchGuard: PhoneTouchGuard?
+    private var linkServer: LinkServer?
+    private var linkTrust: LinkTrust?
+    /// The connection waiting for the person to compare six digits.
+    private var pairingConnection: LinkConnection?
+    /// Phones with a live Conduit Link connection right now.
+    private var linkedNow: Set<String> = []
 
     private var attached: [String: AttachedTransport] = [:]
     private var known: [String: KnownPhone] = [:]
@@ -101,6 +107,8 @@ public final class ConduitEngine: ConduitCommands {
         let touchGuard = PhoneTouchGuard(adb: adb, settings: settingsGuard)
         touchGuard.onStatus = { [weak self] status in self?.touchGuardChanged(status) }
         self.touchGuard = touchGuard
+
+        startLink()
 
         let tracker = DeviceTracker(adb: adb)
         tracker.onUpdate = { [weak self] devices in self?.devicesChanged(devices) }
@@ -301,6 +309,119 @@ public final class ConduitEngine: ConduitCommands {
                 : ActivityEvent(kind: .error, title: "Couldn't close the phone's adb port",
                                 detail: "It closes by itself when the phone restarts."))
         }
+    }
+
+    // MARK: - Conduit Link
+
+    /// The channel to Conduit for Android: state, links, files and calls. It
+    /// needs no developer options, and works over any network the two share
+    /// — including the phone's own hotspot.
+    private func startLink() {
+        let identity = LinkIdentity.loadOrCreate()
+        let trust = LinkTrust(defaults: defaults)
+        linkTrust = trust
+
+        let server = LinkServer(identity: identity, trust: trust) {
+            identity.deviceInfo(name: Host.current().localizedName ?? "Mac",
+                                appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
+        }
+        server.onListening = { [weak self] port, advertising in
+            guard let self else { return }
+            store.link.port = port
+            store.link.isAdvertising = advertising
+            if port != nil, !advertising {
+                store.record(ActivityEvent(
+                    kind: .permissionRequired, title: "Let Conduit use the local network",
+                    detail: "macOS is blocking the advert phones look for. Allow Conduit in System Settings → Privacy & Security → Local Network."))
+            }
+        }
+        server.onPairing = { [weak self] connection, request in
+            guard let self else { return }
+            pairingConnection = connection
+            store.link.pairingRequest = LinkPairingRequest(code: request.code, deviceName: request.device.name)
+        }
+        server.onReady = { [weak self] peer in
+            guard let self else { return }
+            pairingConnection = nil
+            store.link.pairingRequest = nil
+            closeLinkPairing()
+            store.record(ActivityEvent(kind: .phoneConnected, title: "\(peer.name) is linked to this Mac"))
+            linkedNow.insert(peer.id)
+            publishLinkedPhones()
+        }
+        server.onEnvelope = { [weak self] envelope, peer in
+            self?.linkReceived(envelope, from: peer)
+        }
+        server.onClosed = { [weak self] peer, error in
+            guard let self else { return }
+            if let peer {
+                store.record(ActivityEvent(kind: .phoneDisconnected, title: "\(peer.name) left this Mac",
+                                           detail: error?.message))
+            } else if let error, store.link.pairingRequest != nil {
+                store.record(ActivityEvent(kind: .error, title: "Pairing didn't finish", detail: error.message))
+            }
+            if let peer { linkedNow.remove(peer.id) }
+            pairingConnection = nil
+            store.link.pairingRequest = nil
+            publishLinkedPhones()
+        }
+        linkServer = server
+        server.start()
+        publishLinkedPhones()
+    }
+
+    public func openLinkPairing() {
+        linkServer?.pairingOpen = true
+        store.link.isPairingOpen = true
+        store.record(ActivityEvent(kind: .permissionRequired, title: "Ready to add a phone",
+                                   detail: "In Conduit for Android, choose Add Mac."))
+    }
+
+    public func closeLinkPairing() {
+        linkServer?.pairingOpen = false
+        store.link.isPairingOpen = false
+    }
+
+    public func confirmLinkPairing() {
+        pairingConnection?.confirmPairing()
+        store.link.pairingRequest = nil
+    }
+
+    public func rejectLinkPairing() {
+        pairingConnection?.rejectPairing()
+        pairingConnection = nil
+        store.link.pairingRequest = nil
+    }
+
+    public func forgetLinkedPhone(id: String) {
+        linkTrust?.forget(id: id)
+        linkServer?.disconnect(peerID: id)
+        linkedNow.remove(id)
+        publishLinkedPhones()
+        store.record(ActivityEvent(kind: .phoneDisconnected, title: "A phone was unlinked from this Mac"))
+    }
+
+    /// Answer what this build understands, and say so plainly for the rest:
+    /// an unknown action gets `unsupported`, as the spec requires.
+    private func linkReceived(_ envelope: Envelope, from peer: LinkPeer) {
+        switch envelope.kind {
+        case .command(let requestID, let action) where action == .sessionPing:
+            linkServer?.send(Envelope.success(to: requestID, payload: envelope.payload), to: peer.id)
+        case .command(let requestID, let action):
+            linkServer?.send(Envelope.failure(to: requestID,
+                                              ProtocolError(.unsupported, "This version of Conduit for Mac does not do that yet.")),
+                             to: peer.id)
+            CoreLog.engine.debug("Conduit Link: no handler for \(action.rawValue)")
+        case .response, .event:
+            break
+        }
+    }
+
+    private func publishLinkedPhones() {
+        let peers = linkTrust.map { Array($0.peers.values) } ?? []
+        store.link.phones = peers
+            .map { LinkedPhone(id: $0.id, name: $0.name, isConnected: linkedNow.contains($0.id), lastSeen: $0.lastSeen) }
+            .sorted { $0.lastSeen > $1.lastSeen }
     }
 
     public func allowCompanionSettingsControl(phoneID: String) {
