@@ -142,6 +142,16 @@ nonisolated struct ADB: Sendable {
         ADBParsing.usbModeRestored(run(["-s", serial, "usb"], timeout: 15).combined)
     }
 
+    /// The port adb's TCP mode is listening on, or nil when it is off. The
+    /// port can be opened or closed outside Conduit, and the phone forgets
+    /// it when it restarts, so this is read rather than assumed.
+    func tcpPort(serial: String) -> UInt16? {
+        let output = run(["-s", serial, "shell", "getprop", "service.adb.tcp.port"], timeout: 8)
+        guard output.ok, let port = UInt16(output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)), port > 0
+        else { return nil }
+        return port
+    }
+
     /// The phone's hardware serial, to check who answered at an address.
     func hardwareSerial(of serial: String) -> String? {
         let output = run(["-s", serial, "shell", "getprop", "ro.serialno"], timeout: 8)

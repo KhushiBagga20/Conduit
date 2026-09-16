@@ -318,6 +318,19 @@ public final class ConduitEngine: ConduitCommands {
         }
     }
 
+    /// Keep the hotspot state honest: the port may have been opened or
+    /// closed outside Conduit, and the phone closes it when it restarts.
+    private func refreshHotspotPort(phoneID: String, serial: String) {
+        guard let adb else { return }
+        Task {
+            let port = await Task.detached { adb.tcpPort(serial: serial) }.value
+            guard known[phoneID] != nil, known[phoneID]?.hotspotPort != port else { return }
+            known[phoneID]?.hotspotPort = port
+            saveKnownPhones()
+            publishPhones()
+        }
+    }
+
     private func refreshCompanionApp(phoneID: String, serial: String) {
         guard let adb else { return }
         Task {
@@ -411,6 +424,7 @@ public final class ConduitEngine: ConduitCommands {
             if companionApps[properties.hardwareSerial] == nil {
                 refreshCompanionApp(phoneID: properties.hardwareSerial, serial: serial)
             }
+            refreshHotspotPort(phoneID: properties.hardwareSerial, serial: serial)
             if store.mirroring.phoneID != properties.hardwareSerial || !store.mirroring.isPhoneScreenOff {
                 restoreSettingsIfPossible(phoneID: properties.hardwareSerial)
             }
