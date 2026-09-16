@@ -53,7 +53,8 @@ final class PhoneSettingsGuard {
         }
 
         let result = await Task.detached {
-            adb.run(["-s", serial, "shell", "settings", "put", namespace.rawValue, key, value], timeout: 8)
+            adb.run(["-s", serial, "shell", "settings", "put", namespace.rawValue, key, ADBParsing.shellQuoted(value)],
+                    timeout: 8)
         }.value
         if !result.ok {
             CoreLog.devices.error("could not change setting \(slot)")
@@ -70,7 +71,7 @@ final class PhoneSettingsGuard {
             guard parts.count == 2 else { continue }
             let arguments = original == "null"
                 ? ["-s", serial, "shell", "settings", "delete", parts[0], parts[1]]
-                : ["-s", serial, "shell", "settings", "put", parts[0], parts[1], original]
+                : ["-s", serial, "shell", "settings", "put", parts[0], parts[1], ADBParsing.shellQuoted(original)]
             let result = await Task.detached { adb.run(arguments, timeout: 8) }.value
             if result.ok {
                 pending[phoneID]?[slot] = nil

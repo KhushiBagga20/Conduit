@@ -75,6 +75,16 @@ public nonisolated enum MirroringStatus: Sendable, Equatable {
     }
 }
 
+/// Whether touches on the phone's own screen are ignored while it is off.
+public nonisolated enum TouchGuardStatus: Sendable, Equatable {
+    case off
+    case starting
+    /// Touches on the phone are ignored; the Mac keeps control.
+    case active
+    /// Touches on the phone still work; the text says why.
+    case unavailable(String)
+}
+
 @Observable
 public final class MirroringState {
 
@@ -97,6 +107,9 @@ public final class MirroringState {
 
     /// True while the phone's own screen is off and mirroring continues.
     public package(set) var isPhoneScreenOff = false
+
+    /// Whether the phone ignores its own touchscreen while its screen is off.
+    public package(set) var touchGuard: TouchGuardStatus = .off
 
     public enum Phase: Sendable, Equatable {
         case idle

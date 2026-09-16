@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The touch guard asks for touch exploration only so that it can take over
+  touch handling, and then passes nothing on. It receives no accessibility
+  events and cannot read windows.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityFlags="flagRequestTouchExplorationMode"
+    android:canRequestTouchExplorationMode="true"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/touch_guard_description"
+    android:isAccessibilityTool="false"
+    android:notificationTimeout="0" />

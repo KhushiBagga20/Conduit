@@ -125,6 +125,24 @@ nonisolated enum ADBParsing {
         }
     }
 
+    /// The data a receiver returned to `am broadcast`, from a line like
+    /// `Broadcast completed: result=0, data="guarding"`. Nil when no
+    /// receiver answered.
+    static func broadcastResultData(_ output: String) -> String? {
+        guard let line = output.split(whereSeparator: \.isNewline).last(where: { $0.contains("Broadcast completed") }),
+              let start = line.range(of: "data=\"")
+        else { return nil }
+        let rest = line[start.upperBound...]
+        guard let end = rest.firstIndex(of: "\"") else { return nil }
+        return String(rest[..<end])
+    }
+
+    /// Quote a value for the phone's shell: `adb shell` joins its arguments
+    /// into one command line, so `$`, spaces or quotes would be interpreted.
+    static func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     static func isNoRouteToHost(_ output: String) -> Bool {
         output.lowercased().contains("no route to host")
     }

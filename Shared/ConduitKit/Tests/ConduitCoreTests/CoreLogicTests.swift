@@ -94,6 +94,33 @@ struct ADBParsingTests {
         #expect(!ADBParsing.permissionGranted("android.permission.CAMERA", in: dumpsys))
         #expect(!ADBParsing.isNoRouteToHost("failed to connect to '10.0.0.5:45423': Connection refused\n"))
     }
+
+    @Test("am broadcast result data, and values quoted for the phone's shell")
+    func broadcastAndQuoting() {
+        let answered = """
+            Broadcasting: Intent { flg=0x20 cmp=com.khushi.conduit/.guard.TouchGuardLease (has extras) }
+            Broadcast completed: result=0, data="guarding"
+            """
+        #expect(ADBParsing.broadcastResultData(answered) == "guarding")
+        #expect(ADBParsing.broadcastResultData("Broadcasting: Intent { … }\nBroadcast completed: result=0\n") == nil)
+        #expect(ADBParsing.broadcastResultData("") == nil)
+
+        #expect(ADBParsing.shellQuoted("0") == "'0'")
+        #expect(ADBParsing.shellQuoted("") == "''")
+        #expect(ADBParsing.shellQuoted("a/b.C$Inner:x y") == "'a/b.C$Inner:x y'")
+        #expect(ADBParsing.shellQuoted("it's") == #"'it'\''s'"#)
+    }
+
+    @Test("the touch guard joins the accessibility services already on, once")
+    func accessibilityServices() {
+        let guardService = PhoneTouchGuard.service
+        #expect(PhoneTouchGuard.enabledServices(adding: guardService, to: "null\n") == guardService)
+        #expect(PhoneTouchGuard.enabledServices(adding: guardService, to: "") == guardService)
+        let talkBack = "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService"
+        #expect(PhoneTouchGuard.enabledServices(adding: guardService, to: talkBack) == "\(talkBack):\(guardService)")
+        #expect(PhoneTouchGuard.enabledServices(adding: guardService, to: "\(talkBack):\(guardService)\n")
+                == "\(talkBack):\(guardService)")
+    }
 }
 
 @Suite("Phone registry")

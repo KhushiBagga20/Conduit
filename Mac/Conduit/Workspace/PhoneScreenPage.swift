@@ -107,12 +107,26 @@ struct PhoneScreenPage: View {
                     get: { store.mirroring.isPhoneScreenOff },
                     set: { store.commands?.setPhoneScreen(on: !$0) })) {
                     Text("Turn the phone's screen off")
-                    Text("Mirroring continues. On some phones the touchscreen stays active, so Conduit pauses touch vibration.")
+                    Text(screenOffDetail)
                 }
                 .disabled(store.mirroring.session?.control.state != .connected)
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var screenOffDetail: String {
+        guard store.mirroring.isPhoneScreenOff else {
+            return "Mirroring continues. With Conduit for Android on the phone, touches on its own screen are ignored until it is back on."
+        }
+        switch store.mirroring.touchGuard {
+        case .off, .starting:
+            return "Making the phone ignore touches on its screen…"
+        case .active:
+            return "Touches on the phone are ignored. This Mac keeps control."
+        case .unavailable(let reason):
+            return reason
+        }
     }
 
     private func start(_ phone: PhoneDevice) {

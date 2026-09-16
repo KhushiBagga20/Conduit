@@ -311,12 +311,22 @@ fun SettingsContent(
             Row(verticalAlignment = Alignment.Top) {
                 IconBubble(Icons.Rounded.PrivacyTip)
                 Spacer(Modifier.width(14.dp))
-                Text(
-                    "Conduit asks for each permission only when you use the feature that needs it. " +
-                        "Nothing from this app is included in backups or device transfers.",
-                    color = canvas.contentSecondary,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                Column {
+                    Text(
+                        "Conduit asks for each permission only when you use the feature that needs it. " +
+                            "Nothing from this app is included in backups or device transfers.",
+                        color = canvas.contentSecondary,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "While Conduit for Mac mirrors this phone with its screen off, it turns on Conduit touch " +
+                            "guard: an accessibility service that ignores touches on the phone and reads nothing " +
+                            "on the screen. Pressing the power button turns it off.",
+                        color = canvas.contentSecondary,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
             }
         }
 

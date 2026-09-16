@@ -31,6 +31,7 @@ public final class ConduitEngine: ConduitCommands {
     private var reconnector: WirelessReconnector?
     private var mirroring: MirroringController?
     private var settingsGuard: PhoneSettingsGuard?
+    private var touchGuard: PhoneTouchGuard?
 
     private var attached: [String: AttachedTransport] = [:]
     private var known: [String: KnownPhone] = [:]
@@ -95,7 +96,11 @@ public final class ConduitEngine: ConduitCommands {
         mirroring.onSessionEnded = { [weak self] phoneID in self?.mirroringEnded(phoneID: phoneID) }
         mirroring.onSessionResumed = { [weak self] in self?.reapplyPhoneScreenState() }
         self.mirroring = mirroring
-        settingsGuard = PhoneSettingsGuard(adb: adb, defaults: defaults)
+        let settingsGuard = PhoneSettingsGuard(adb: adb, defaults: defaults)
+        self.settingsGuard = settingsGuard
+        let touchGuard = PhoneTouchGuard(adb: adb, settings: settingsGuard)
+        touchGuard.onStatus = { [weak self] status in self?.touchGuardChanged(status) }
+        self.touchGuard = touchGuard
 
         let tracker = DeviceTracker(adb: adb)
         tracker.onUpdate = { [weak self] devices in self?.devicesChanged(devices) }
@@ -183,6 +188,8 @@ public final class ConduitEngine: ConduitCommands {
               let phoneID = store.mirroring.phoneID, let serial = mirroring?.currentSerial else { return }
 
         if on {
+            touchGuard?.stop(serial: serial)
+            store.mirroring.touchGuard = .off
             session.input.setDisplayPower(on: true)
             store.mirroring.isPhoneScreenOff = false
             store.record(ActivityEvent(kind: .mirroringStarted, title: "Phone screen turned on"))
@@ -190,12 +197,13 @@ public final class ConduitEngine: ConduitCommands {
         } else {
             store.mirroring.isPhoneScreenOff = true
             session.input.setDisplayPower(on: false)
-            store.record(ActivityEvent(
-                kind: .mirroringStopped, title: "Phone screen turned off",
-                detail: "Mirroring continues. This phone keeps its touchscreen active, so touch vibration is paused until the screen is back on."))
+            store.record(ActivityEvent(kind: .mirroringStopped, title: "Phone screen turned off",
+                                       detail: "Mirroring continues."))
             // MEASURED on a Galaxy S24 Ultra: turning the panel off leaves the
-            // touchscreen live, and every accidental tap buzzed. Touch
-            // vibration is paused while the screen is off and put back after.
+            // touchscreen live. The touch guard makes the phone ignore it;
+            // touch vibration is paused too, for phones where the guard
+            // cannot run, and put back after.
+            touchGuard?.start(phoneID: phoneID, serial: serial, companionApp: companionApps[phoneID])
             Task {
                 await settingsGuard?.override(.system, "haptic_feedback_enabled", to: "0",
                                               phoneID: phoneID, serial: serial)
@@ -206,9 +214,38 @@ public final class ConduitEngine: ConduitCommands {
     private func reapplyPhoneScreenState() {
         guard store.mirroring.isPhoneScreenOff, let session = store.mirroring.session else { return }
         session.input.setDisplayPower(on: false)
+        // A new server may run over another transport; keep the guard's
+        // lease renewals going there.
+        let guardRunning = store.mirroring.touchGuard == .active || store.mirroring.touchGuard == .starting
+        if guardRunning, let phoneID = store.mirroring.phoneID, let serial = mirroring?.currentSerial {
+            touchGuard?.start(phoneID: phoneID, serial: serial, companionApp: companionApps[phoneID])
+        }
+    }
+
+    private func touchGuardChanged(_ status: TouchGuardStatus) {
+        guard store.mirroring.isPhoneScreenOff else { return }
+        let previous = store.mirroring.touchGuard
+        // Re-checking a running guard after mirroring resumes is not news.
+        if previous == .active && status == .starting { return }
+        store.mirroring.touchGuard = status
+        guard status != previous else { return }
+        switch status {
+        case .active:
+            if previous == .starting {
+                store.record(ActivityEvent(kind: .mirroringStopped, title: "Touches on the phone are ignored",
+                                           detail: "Until its screen is back on. The Mac keeps control."))
+            }
+        case .unavailable(let reason):
+            store.record(ActivityEvent(kind: .permissionRequired, title: "The phone still responds to touch",
+                                       detail: reason))
+        case .off, .starting:
+            break
+        }
     }
 
     private func mirroringEnded(phoneID: String) {
+        touchGuard?.stop(serial: PhoneRegistry.targets(for: phoneID, attached: Array(attached.values)).first?.serial)
+        store.mirroring.touchGuard = .off
         store.mirroring.isPhoneScreenOff = false
         restoreSettingsIfPossible(phoneID: phoneID)
     }
