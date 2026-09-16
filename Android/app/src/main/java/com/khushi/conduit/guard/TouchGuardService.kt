@@ -13,6 +13,7 @@ import android.util.Log
 import android.view.Display
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 
 /**
  * Makes this phone ignore its own touchscreen while Conduit for Mac mirrors
@@ -78,7 +79,7 @@ class TouchGuardService : AccessibilityService() {
         handler.postDelayed(leaseCheck, LEASE_CHECK_MS)
 
         active = this
-        Log.i(TAG, "ignoring touches on this phone")
+        Log.i(TAG, "ready; touch exploration on: ${touchExplorationOn}")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
@@ -112,6 +113,14 @@ class TouchGuardService : AccessibilityService() {
         if (active === this) active = null
     }
 
+    /**
+     * Whether Android is routing touches through accessibility at all. Until
+     * it is, this service is bound but sees nothing — so the Mac is told the
+     * guard is not up rather than being let believe it is.
+     */
+    private val touchExplorationOn: Boolean
+        get() = getSystemService(AccessibilityManager::class.java)?.isTouchExplorationEnabled == true
+
     companion object {
         private const val TAG = "ConduitTouchGuard"
         private const val LEASE_CHECK_MS = 5_000L
@@ -119,7 +128,7 @@ class TouchGuardService : AccessibilityService() {
         /** The running guard, if touches are being ignored right now. Main thread only. */
         private var active: TouchGuardService? = null
 
-        val isGuarding: Boolean get() = active != null
+        val isGuarding: Boolean get() = active?.touchExplorationOn == true
 
         /** Ends the guard now. Main thread only. */
         fun release() {

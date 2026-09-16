@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   The touch guard asks for touch exploration only so that it can take over
-  touch handling, and then passes nothing on. It receives no accessibility
-  events and cannot read windows.
+  touch handling, and then passes nothing on. It cannot read windows.
+
+  MEASURED: Android only turns touch exploration on for a service that can
+  receive accessibility events — AccessibilityManagerService checks
+  canReceiveEventsLocked(), which is false while the event mask is zero — so
+  a service asking for no events at all is bound but never sent a touch.
+  These two types are the least revealing that satisfy it: they say that a
+  touch started and ended, and carry no window content.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeTouchInteractionStart|typeTouchInteractionEnd"
     android:accessibilityFlags="flagRequestTouchExplorationMode"
     android:canRequestTouchExplorationMode="true"
     android:canRetrieveWindowContent="false"
