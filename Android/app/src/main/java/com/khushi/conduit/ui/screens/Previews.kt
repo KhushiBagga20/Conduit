@@ -3,6 +3,7 @@ package com.khushi.conduit.ui.screens
 import android.content.res.Configuration
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
+import com.khushi.conduit.link.LinkHub
 import com.khushi.conduit.system.Battery
 import com.khushi.conduit.system.PhoneSetupSample
 import com.khushi.conduit.system.WifiLink
@@ -48,6 +49,8 @@ private fun MacsPreview() {
             MacsContent(
                 phone = PhoneSetupSample(wirelessDebugging = false),
                 hotspotAddress = "192.168.43.1",
+                link = LinkHub.State(),
+                actions = MacsActions(),
                 onOpen = {},
             )
         }

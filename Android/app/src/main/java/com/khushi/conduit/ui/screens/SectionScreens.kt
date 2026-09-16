@@ -1,6 +1,12 @@
 package com.khushi.conduit.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.text.format.DateUtils
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,15 +25,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.LaptopMac
 import androidx.compose.material.icons.rounded.Coffee
 import androidx.compose.material.icons.rounded.DeveloperMode
 import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.WifiTethering
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,11 +50,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.khushi.conduit.core.design.DesignTokens
 import com.khushi.conduit.core.protocol.Availability
 import com.khushi.conduit.core.protocol.FeatureId
+import com.khushi.conduit.link.LinkHub
+import com.khushi.conduit.link.LinkService
 import com.khushi.conduit.system.PhoneSetup
 import com.khushi.conduit.system.SystemScreen
 import com.khushi.conduit.system.rememberHotspotAddress
@@ -89,23 +104,58 @@ private fun ScreenColumn(title: String, content: @Composable ColumnScope.() -> U
 @Composable
 fun MacsScreen() {
     val context = LocalContext.current
+    val link by LinkHub.state.collectAsState()
+
+    // Android 13+ hides the "Linked to" notification without this; linking
+    // still works if the person says no.
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        LinkService.startAdding(context)
+    }
+
     MacsContent(
         phone = rememberPhoneSettings(),
         hotspotAddress = rememberHotspotAddress(),
+        link = link,
+        actions = MacsActions(
+            addMac = {
+                if (context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                    LinkService.startAdding(context)
+                } else {
+                    notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            },
+            stopAdding = { LinkService.stopAdding(context) },
+            pair = { LinkService.pair(context, it) },
+            confirmPairing = LinkService::confirmPairing,
+            rejectPairing = LinkService::rejectPairing,
+            unlink = { LinkService.unlink(context, it) },
+        ),
         onOpen = { it.open(context) },
     )
 }
 
-@Composable
-fun MacsContent(phone: PhoneSetup, hotspotAddress: String?, onOpen: (SystemScreen) -> Unit) {
-    ScreenColumn("Macs") {
-        DottedEmptyState(
-            title = "No paired Macs",
-            message = "Pairing a Mac — for links, calls and using this phone as a trackpad — is planned. " +
-                "Conduit for Mac already mirrors this phone over USB or Wi-Fi.",
-        ) { AvailabilityPill(Availability.PLANNED) }
+/** What the Macs screen can ask Conduit Link to do. */
+class MacsActions(
+    val addMac: () -> Unit = {},
+    val stopAdding: () -> Unit = {},
+    val pair: (LinkHub.FoundMac) -> Unit = {},
+    val confirmPairing: () -> Unit = {},
+    val rejectPairing: () -> Unit = {},
+    val unlink: (String) -> Unit = {},
+)
 
-        SectionLabel("Connect to Conduit for Mac")
+@Composable
+fun MacsContent(
+    phone: PhoneSetup,
+    hotspotAddress: String?,
+    link: LinkHub.State,
+    actions: MacsActions,
+    onOpen: (SystemScreen) -> Unit,
+) {
+    ScreenColumn("Macs") {
+        LinkedMacsSection(link, actions)
+
+        SectionLabel("Mirroring from Conduit for Mac")
         PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
             SetupStep(1, "Developer options", "Settings → About phone → Software information → tap Build number 7 times.", phone.developerOptions)
             CardDivider()
@@ -121,6 +171,117 @@ fun MacsContent(phone: PhoneSetup, hotspotAddress: String?, onOpen: (SystemScree
 
         SectionLabel("Away from Wi-Fi")
         HotspotCard(hotspotAddress, onOpen)
+    }
+}
+
+/**
+ * Conduit Link: the Macs this phone is paired with, adding one, and the six
+ * digits both people compare before either device trusts the other.
+ */
+@Composable
+private fun LinkedMacsSection(link: LinkHub.State, actions: MacsActions) {
+    val canvas = LocalCanvas.current
+
+    if (link.linked.isEmpty() && !link.adding) {
+        DottedEmptyState(
+            title = "No Macs linked yet",
+            message = "Link a Mac to share links, files and notifications with it. It works on any network " +
+                "you share — including this phone's hotspot — and needs no developer options.",
+        ) {
+            PillButton("Add Mac", icon = Icons.Rounded.Add, onClick = actions.addMac)
+        }
+    }
+
+    if (link.linked.isNotEmpty()) {
+        SectionLabel("Linked Macs")
+        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+            link.linked.forEachIndexed { index, mac ->
+                if (index > 0) CardDivider()
+                val connected = link.connectedId == mac.id
+                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconBubble(Icons.Rounded.LaptopMac)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(mac.name, color = canvas.content, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (connected) "Linked now" else "Last seen ${DateUtils.getRelativeTimeSpanString(mac.lastSeen)}",
+                            color = if (connected) LocalStatusColors.current.connected else canvas.contentSecondary,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    TextButton(onClick = { actions.unlink(mac.id) }) { Text("Unlink", color = canvas.contentSecondary) }
+                }
+            }
+        }
+        if (!link.adding) {
+            PillButton("Add another Mac", icon = Icons.Rounded.Add, modifier = Modifier.fillMaxWidth(), onClick = actions.addMac)
+        }
+    }
+
+    if (link.adding) {
+        SectionLabel("Add a Mac")
+        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+            Text(
+                "On the Mac, open Conduit → Devices → Add Phone. Macs appear here when they are on a network this " +
+                    "phone can reach, or when your Mac is connected to this phone over adb.",
+                color = canvas.contentSecondary,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(8.dp))
+            if (link.found.isEmpty()) {
+                Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), color = canvas.content, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Text("Looking for Macs…", color = canvas.content, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            link.found.forEachIndexed { index, found ->
+                if (index > 0) CardDivider()
+                Row(
+                    Modifier.fillMaxWidth().clickable { actions.pair(found) }.padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconBubble(Icons.Rounded.LaptopMac)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(found.name, color = canvas.content, style = MaterialTheme.typography.titleMedium)
+                        Text(found.hosts.first(), color = canvas.contentSecondary, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("Pair", color = canvas.content, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+            (link.status as? LinkHub.Status.Failed)?.let {
+                Text(it.message, color = LocalStatusColors.current.error, style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp))
+            }
+            (link.status as? LinkHub.Status.Connecting)?.let {
+                Text("Contacting ${it.macName}…", color = canvas.contentSecondary, style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+        TextButton(onClick = actions.stopAdding, modifier = Modifier.fillMaxWidth()) {
+            Text("Cancel", color = canvas.contentSecondary)
+        }
+    }
+
+    link.pairing?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = actions.rejectPairing,
+            icon = { Icon(Icons.Rounded.LaptopMac, contentDescription = null) },
+            title = { Text("Pair with ${prompt.macName}") },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    Text("Check that your Mac shows these digits too.")
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        prompt.code.chunked(3).joinToString(" "),
+                        style = MaterialTheme.typography.displaySmall.copy(fontFamily = FontFamily.Monospace),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = actions.confirmPairing) { Text("Pair") } },
+            dismissButton = { TextButton(onClick = actions.rejectPairing) { Text("Don't pair") } },
+        )
     }
 }
 

@@ -95,6 +95,18 @@ lsof -nP -iTCP:47384 -sTCP:LISTEN     # the listener
 dns-sd -B _conduit._tcp               # the advert, once allowed
 ```
 
+When a phone with Conduit for Android attaches over adb, the Mac also tells
+it where Conduit Link listens (`MacHint`), which is how the phone finds the
+Mac on its own hotspot or while the advert is blocked.
+
+Both languages run `Shared/Protocol/vectors/handshake.json`. To check Kotlin
+against a real, running Conduit for Mac:
+
+```bash
+cd Android
+CONDUIT_MAC=127.0.0.1:47384 ./gradlew :core:testDebugUnitTest --tests '*LinkInteropTest*'
+```
+
 ## Shared definitions
 
 - **Design tokens** — edit `Shared/Design/tokens.json`, then run

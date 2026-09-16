@@ -10,6 +10,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import com.khushi.conduit.link.LinkService
 import com.khushi.conduit.ui.AppPreferences
 import com.khushi.conduit.ui.ConduitApp
 import com.khushi.conduit.ui.LocalAppPreferences
@@ -19,6 +20,8 @@ import com.khushi.conduit.ui.theme.ConduitTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Reconnect to paired Macs whenever Conduit opens.
+        LinkService.ensureRunning(this)
         enableEdgeToEdge()
         setContent {
             val preferences = remember { AppPreferences(this) }

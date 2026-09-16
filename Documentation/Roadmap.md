@@ -25,7 +25,7 @@ and works over any network the two share — including the phone's hotspot.
 | Stage | What it adds | Depends on |
 |---|---|---|
 | **A · Anywhere** | Reach the phone over its own hotspot, where Wireless debugging cannot go | — |
-| **B · Conduit Link** | The channel: Mac listener and Bonjour advert, phone client and foreground service, identity keys, pairing, sealed frames, heartbeat | A |
+| **B · Conduit Link** | The channel: Mac listener and Bonjour advert, phone client and foreground service, identity keys, pairing, sealed frames, heartbeat. Built on both sides; interop checked between Kotlin and the running Mac — pairing on the phone pending | A |
 | **C · Device state** | Battery, charging and network shown on the Mac from the phone itself, not from adb polling | B |
 | **D · Links** | Share a link from the phone to the Mac and back, from the share sheet and the menu bar | B |
 | **E · Find my Mac** | Ring this Mac from the phone | B |

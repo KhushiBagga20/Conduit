@@ -19,6 +19,13 @@
   Only the Mac turns it on, for as long as the screen is off; it reads
   nothing on the screen. Its lease receiver accepts only senders that hold
   WRITE_SECURE_SETTINGS, which in practice is the adb shell.
+
+  Conduit Link — the channel to Conduit for Mac — needs INTERNET to dial the
+  Mac, and runs as a connected-device foreground service so the link does not
+  depend on a visible screen; that service type requires CHANGE_NETWORK_STATE,
+  which is granted at install. POST_NOTIFICATIONS is asked for when a Mac is
+  added, so the "Linked to" notification can show. MacHint, like the lease,
+  accepts only senders holding WRITE_SECURE_SETTINGS.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
@@ -27,6 +34,11 @@
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="false"
@@ -59,6 +71,17 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/touch_guard_service" />
         </service>
+
+        <service
+            android:name=".link.LinkService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <receiver
+            android:name=".link.MacHint"
+            android:exported="true"
+            android:permission="android.permission.WRITE_SECURE_SETTINGS"
+            tools:ignore="ExportedReceiver" />
 
         <receiver
             android:name=".guard.TouchGuardLease"
