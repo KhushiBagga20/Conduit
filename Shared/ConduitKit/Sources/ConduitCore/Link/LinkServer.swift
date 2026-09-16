@@ -20,8 +20,8 @@ import Network
 final class LinkServer {
 
     /// The spec's preferred port. Any free port will do if it is taken.
-    static let preferredPort: UInt16 = 47384
-    static let serviceType = "_conduit._tcp"
+    nonisolated static let preferredPort: UInt16 = 47384
+    nonisolated static let serviceType = "_conduit._tcp"
 
     private let identity: LinkIdentity
     private let trust: LinkTrust
@@ -59,6 +59,8 @@ final class LinkServer {
         guard listener == nil else { return }
         let parameters = NWParameters.tcp
         parameters.includePeerToPeer = true
+        // So a relaunch keeps the same port while the last one lets go of it.
+        parameters.allowLocalEndpointReuse = true
 
         guard let listener = try? NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port) ?? .any) else {
             CoreLog.engine.error("Conduit Link could not open a port")
@@ -86,8 +88,7 @@ final class LinkServer {
                     // so listen without the advert rather than not at all.
                     if advertising, Self.isLocalNetworkRefusal(error) {
                         CoreLog.engine.error("macOS is blocking Conduit Link's Bonjour advert; listening without it")
-                        stopListener()
-                        start(on: port, advertising: false)
+                        restart(after: listener) { $0.start(on: port, advertising: false) }
                         return
                     }
                     // MEASURED: a port already in use does not fail when the
@@ -95,8 +96,7 @@ final class LinkServer {
                     // carries the real port, so any free one will do.
                     if port != 0, Self.isAddressInUse(error) {
                         CoreLog.engine.notice("port \(port) is taken; Conduit Link is taking any free port")
-                        stopListener()
-                        start(on: 0, advertising: advertising)
+                        restart(after: listener) { $0.start(on: 0, advertising: advertising) }
                         return
                     }
                     CoreLog.engine.error("Conduit Link stopped listening — \(error.localizedDescription)")
@@ -121,6 +121,22 @@ final class LinkServer {
         connections.removeAll()
         stopListener()
         onListening(nil, false)
+    }
+
+    /// Start again only once the old listener has let go of its port.
+    /// MEASURED: starting straight after cancel raced it, found the port still
+    /// taken, and fell back to a random one for no reason.
+    private func restart(after old: NWListener, _ start: @escaping (LinkServer) -> Void) {
+        old.newConnectionHandler = nil
+        old.stateUpdateHandler = { state in
+            guard case .cancelled = state else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                start(self)
+            }
+        }
+        if listener === old { listener = nil }
+        old.cancel()
     }
 
     private func stopListener() {

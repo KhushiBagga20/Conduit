@@ -34,6 +34,7 @@ public final class ConduitEngine: ConduitCommands {
     private var touchGuard: PhoneTouchGuard?
     private var linkServer: LinkServer?
     private var linkTrust: LinkTrust?
+    private var linkIdentity: LinkIdentity?
     /// The connection waiting for the person to compare six digits.
     private var pairingConnection: LinkConnection?
     /// Phones with a live Conduit Link connection right now.
@@ -320,6 +321,7 @@ public final class ConduitEngine: ConduitCommands {
         let identity = LinkIdentity.loadOrCreate()
         let trust = LinkTrust(defaults: defaults)
         linkTrust = trust
+        linkIdentity = identity
 
         let server = LinkServer(identity: identity, trust: trust) {
             identity.deviceInfo(name: Host.current().localizedName ?? "Mac",
@@ -329,6 +331,7 @@ public final class ConduitEngine: ConduitCommands {
             guard let self else { return }
             store.link.port = port
             store.link.isAdvertising = advertising
+            if port != nil { sendLinkHintToAttachedPhones() }
             if port != nil, !advertising {
                 store.record(ActivityEvent(
                     kind: .permissionRequired, title: "Let Conduit use the local network",
@@ -373,6 +376,7 @@ public final class ConduitEngine: ConduitCommands {
     public func openLinkPairing() {
         linkServer?.pairingOpen = true
         store.link.isPairingOpen = true
+        sendLinkHintToAttachedPhones()
         store.record(ActivityEvent(kind: .permissionRequired, title: "Ready to add a phone",
                                    detail: "In Conduit for Android, choose Add Mac."))
     }
@@ -417,6 +421,32 @@ public final class ConduitEngine: ConduitCommands {
         }
     }
 
+    /// Tell Conduit for Android where this Mac listens, over adb. That finds
+    /// the Mac where Bonjour cannot: on the phone's own hotspot, or before
+    /// macOS lets Conduit advertise itself. It only says where to knock — the
+    /// handshake still proves who answers.
+    private func sendLinkHint(serial: String) {
+        guard let adb, let port = store.link.port, let identity = linkIdentity else { return }
+        let hosts = LinkAddresses.ipv4()
+        guard !hosts.isEmpty else { return }
+        let name = Host.current().localizedName ?? "Mac"
+        Task.detached {
+            adb.run(["-s", serial, "shell", "am", "broadcast", "-f", "32",
+                     "-n", "com.khushi.conduit/com.khushi.conduit.link.MacHint",
+                     "--es", "id", identity.deviceID, "--es", "name", ADBParsing.shellQuoted(name),
+                     "--es", "hosts", hosts.joined(separator: ","), "--ei", "port", String(port)], timeout: 8)
+        }
+    }
+
+    private func sendLinkHintToAttachedPhones() {
+        for transport in attached.values where transport.device.isReady {
+            guard let phoneID = transport.properties?.hardwareSerial ?? transport.identityHint,
+                  case .installed = companionApps[phoneID] ?? .unknown
+            else { continue }
+            sendLinkHint(serial: transport.device.serial)
+        }
+    }
+
     private func publishLinkedPhones() {
         let peers = linkTrust.map { Array($0.peers.values) } ?? []
         store.link.phones = peers
@@ -458,6 +488,7 @@ public final class ConduitEngine: ConduitCommands {
             guard let status = await Task.detached(operation: { adb.companionAppStatus(serial: serial) }).value else { return }
             companionApps[phoneID] = status
             publishPhones()
+            if case .installed = status { sendLinkHint(serial: serial) }
         }
     }
 

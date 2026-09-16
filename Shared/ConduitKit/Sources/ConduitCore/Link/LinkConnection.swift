@@ -40,6 +40,8 @@ final class LinkConnection {
     private var opener: LinkCrypto.Opener?
     private var peer: LinkPeer?
     private var closed = false
+    /// Set once a refusal is on its way out: nothing more is read or handled.
+    private var closing = false
 
     init(connection: NWConnection, identity: LinkIdentity, device: DeviceInfo,
          trust: LinkTrust, pairingOpen: Bool) {
@@ -83,7 +85,7 @@ final class LinkConnection {
     private func receive() {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
             Task { @MainActor [weak self] in
-                guard let self, !closed else { return }
+                guard let self, !closed, !closing else { return }
                 if let data, !data.isEmpty { decode(data) }
                 if isComplete || error != nil {
                     finish(error.map { ProtocolError(.internal, $0.localizedDescription) })
@@ -104,7 +106,7 @@ final class LinkConnection {
             finish(ProtocolError(.invalidRequest, "The phone sent a frame Conduit could not read."))
             return
         }
-        for frame in frames where !closed {
+        for frame in frames where !closed && !closing {
             handle(frame)
         }
     }
@@ -171,9 +173,21 @@ final class LinkConnection {
                 self.peer = peer
                 onReady(peer)
             case .fail(let error):
-                finish(error)
+                finishAfterSending(error)
             }
         }
+    }
+
+    /// Close once everything queued has gone out. MEASURED: cancelling an
+    /// NWConnection drops what it has not yet sent, so a phone that was
+    /// refused saw the connection vanish without the error that says why.
+    private func finishAfterSending(_ error: ProtocolError?) {
+        guard !closed, !closing else { return }
+        closing = true
+        connection.send(content: nil, contentContext: .finalMessage, isComplete: true,
+                        completion: .contentProcessed { _ in
+                            Task { @MainActor [weak self] in self?.finish(error) }
+                        })
     }
 
     private func send(_ payload: Data, channel: LinkChannel, type: UInt8, sealed: Bool) {
