@@ -53,6 +53,9 @@ public protocol ConduitCommands: AnyObject {
     func prepareHotspotConnection(phoneID: String)
     func stopHotspotConnection(phoneID: String)
 
+    /// Ask linked phones over Bluetooth to turn their hotspot on.
+    func requestPhoneHotspot()
+
     /// Conduit Link: pairing with a phone, and forgetting one.
     func openLinkPairing()
     func closeLinkPairing()
@@ -71,8 +74,23 @@ public nonisolated struct Preferences: Codable, Sendable, Equatable {
     public var clipboardSync = true
     /// Reconnect known phones over Wireless debugging when they appear.
     public var autoConnectWireless = true
+    /// When this Mac goes offline, ask a linked phone over Bluetooth to turn
+    /// its hotspot on.
+    public var askPhoneForHotspot = true
 
     public init() {}
+
+    /// Every field is optional on the way in, so preferences saved by an
+    /// older build keep their values instead of failing to decode and
+    /// silently resetting to defaults.
+    public init(from decoder: Decoder) throws {
+        let saved = try decoder.container(keyedBy: CodingKeys.self)
+        preferredPhoneID = try saved.decodeIfPresent(String.self, forKey: .preferredPhoneID)
+        mirroring = try saved.decodeIfPresent(MirroringOptions.self, forKey: .mirroring) ?? MirroringOptions()
+        clipboardSync = try saved.decodeIfPresent(Bool.self, forKey: .clipboardSync) ?? true
+        autoConnectWireless = try saved.decodeIfPresent(Bool.self, forKey: .autoConnectWireless) ?? true
+        askPhoneForHotspot = try saved.decodeIfPresent(Bool.self, forKey: .askPhoneForHotspot) ?? true
+    }
 }
 
 public nonisolated struct ToolStatus: Sendable, Equatable {

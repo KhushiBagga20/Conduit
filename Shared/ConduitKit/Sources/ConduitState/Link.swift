@@ -36,6 +36,18 @@ public nonisolated struct LinkPairingRequest: Sendable, Equatable {
     }
 }
 
+/// Asking a phone for its hotspot over Bluetooth, for when this Mac is offline.
+public nonisolated enum HotspotRequestStatus: Sendable, Equatable {
+    case idle
+    case asking
+    /// A phone took the request; it shows a notification to turn the hotspot on.
+    case asked(Date)
+    case noPhoneNearby
+    case bluetoothOff
+    case bluetoothDenied
+    case failed(String)
+}
+
 @Observable
 public final class LinkState {
 
@@ -55,6 +67,8 @@ public final class LinkState {
     public package(set) var pairingRequest: LinkPairingRequest?
 
     public package(set) var phones: [LinkedPhone] = []
+
+    public package(set) var hotspotRequest: HotspotRequestStatus = .idle
 
     package init() {}
 }

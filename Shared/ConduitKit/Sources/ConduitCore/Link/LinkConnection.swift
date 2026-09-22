@@ -50,7 +50,7 @@ final class LinkConnection {
     }
 
     func start() {
-        connection.stateUpdateHandler = { state in
+        connection.stateUpdateHandler = { [weak self] state in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 switch state {
@@ -83,7 +83,7 @@ final class LinkConnection {
     // MARK: - Receiving
 
     private func receive() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
             Task { @MainActor [weak self] in
                 guard let self, !closed, !closing else { return }
                 if let data, !data.isEmpty { decode(data) }
@@ -185,7 +185,7 @@ final class LinkConnection {
         guard !closed, !closing else { return }
         closing = true
         connection.send(content: nil, contentContext: .finalMessage, isComplete: true,
-                        completion: .contentProcessed { _ in
+                        completion: .contentProcessed { [weak self] _ in
                             Task { @MainActor [weak self] in self?.finish(error) }
                         })
     }

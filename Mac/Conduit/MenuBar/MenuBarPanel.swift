@@ -186,6 +186,13 @@ struct MenuBarPanel: View {
                     trailing: controlReady ? nil : "While mirroring", isEnabled: controlReady) {
                 store.commands?.sendMacClipboardToPhone()
             }
+            if !store.link.phones.isEmpty {
+                MenuRow("Use Phone Hotspot", systemImage: "personalhotspot",
+                        trailing: store.link.hotspotRequest.shortStatus,
+                        isEnabled: store.link.hotspotRequest != .asking) {
+                    store.commands?.requestPhoneHotspot()
+                }
+            }
 
             MenuSectionHeader("Coming to Conduit")
             ForEach(plannedActions, id: \.title) { action in

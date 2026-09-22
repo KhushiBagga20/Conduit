@@ -21,6 +21,15 @@ enum class SystemScreen {
         HOTSPOT -> listOf(Intent("com.android.settings.TETHER_SETTINGS"), Intent(Settings.ACTION_WIRELESS_SETTINGS))
     }
 
+    /**
+     * The first of the candidates this phone can open, for a notification to
+     * launch directly — Android does not let a notification start an activity
+     * through anything in between.
+     */
+    fun intent(context: Context): Intent? =
+        candidates().firstOrNull { it.resolveActivity(context.packageManager) != null }
+            ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
     /** Returns false when this phone has no such screen. */
     fun open(context: Context): Boolean {
         for (intent in candidates()) {

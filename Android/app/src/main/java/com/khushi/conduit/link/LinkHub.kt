@@ -31,6 +31,8 @@ object LinkHub {
         val adding: Boolean = false,
         val found: List<FoundMac> = emptyList(),
         val pairing: PairingPrompt? = null,
+        /** A paired Mac can ask for the hotspot over Bluetooth right now. */
+        val hotspotRequestsReady: Boolean = false,
     )
 
     private val mutable = MutableStateFlow(State())

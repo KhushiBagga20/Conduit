@@ -321,6 +321,39 @@ stuck mouse button.
 
 Receivers must accept codes they do not know and treat them as `internal`.
 
+## 8a. Hotspot request over Bluetooth LE
+
+When the Mac has no network it cannot reach the phone over Conduit Link, so
+it asks for the phone's hotspot over Bluetooth LE instead. Android does not
+let an app turn its hotspot on, so the phone answers by showing a
+notification that opens the hotspot switch.
+
+- **Roles.** The phone is the peripheral: while it has a paired Mac and the
+  person has not turned requests off, it advertises service
+  `9D99F667-22A5-4207-B9F0-CF2A1F80D81B` and serves one writable
+  characteristic, `A9FE1931-A845-4B54-811D-9095A568370A`. The Mac is the
+  central: it scans only when it wants the hotspot.
+- **The advert carries no identifier** beyond the service UUID. The phone's
+  Bluetooth address rotates as Android's privacy rules require.
+- **The request** is one write, big-endian:
+
+```
+┌─────────┬──────────┬────────────┬───────────────┬────────────┬───────────┐
+│ version │ macID    │ phoneID    │ timestamp     │ nonce      │ signature │
+│ u8 = 1  │ 16 bytes │ 16 bytes   │ u64 ms (Unix) │ 16 bytes   │ DER       │
+└─────────┴──────────┴────────────┴───────────────┴────────────┴───────────┘
+```
+
+  `macID` and `phoneID` are the raw 16 bytes of each device ID (§4). The
+  signature is ECDSA-SHA256 by the Mac's identity key over
+  `"conduit-hotspot-v1" ‖ macID ‖ phoneID ‖ timestamp ‖ nonce`.
+- **The phone acts only if** it is paired with `macID`, `phoneID` is its own,
+  the signature verifies against the stored key, the timestamp is within two
+  minutes of its own clock, and the nonce has not been seen in the last five
+  minutes. Anything else is ignored without an answer.
+- **The Mac** writes one request per paired phone, because it cannot tell
+  from the advert which phone is which.
+
 ## 9. Versioning
 
 - The version increases only when an existing layout or rule changes
@@ -336,6 +369,8 @@ Receivers must accept codes they do not know and treat them as `internal`.
 |---|---|
 | [`vectors/envelopes.json`](vectors/envelopes.json) | Valid envelopes that must decode and re-encode to the same JSON value, and invalid ones that must be rejected |
 | [`vectors/frames.json`](vectors/frames.json) | Plaintext frames as hex, for the framing codec |
+| [`vectors/handshake.json`](vectors/handshake.json) | The handshake's key schedule, signed statements, pairing code, device ID and sealed frames |
+| [`vectors/hotspot.json`](vectors/hotspot.json) | A hotspot request from a fixed Mac key: its signed statement, wire bytes and a signature to verify |
 
 Swift runs them in `ConduitProtocolTests`; Kotlin runs them in
 `:core:testDebugUnitTest`. A change to this document without matching vector

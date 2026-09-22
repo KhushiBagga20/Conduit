@@ -296,3 +296,19 @@ struct ScrcpyServerTests {
         #expect(try Data(contentsOf: url).count > 50_000)
     }
 }
+
+@Suite("Preferences")
+struct PreferencesTests {
+
+    @Test("preferences saved by an older build keep their values")
+    func olderPreferencesDecode() throws {
+        let saved = #"{"clipboardSync":false,"autoConnectWireless":true,"preferredPhoneID":"RZCY60JS0PM"}"#
+        let preferences = try JSONDecoder().decode(Preferences.self, from: Data(saved.utf8))
+        #expect(preferences.clipboardSync == false)
+        #expect(preferences.preferredPhoneID == "RZCY60JS0PM")
+        #expect(preferences.askPhoneForHotspot == true)
+
+        let roundTrip = try JSONDecoder().decode(Preferences.self, from: JSONEncoder().encode(preferences))
+        #expect(roundTrip == preferences)
+    }
+}

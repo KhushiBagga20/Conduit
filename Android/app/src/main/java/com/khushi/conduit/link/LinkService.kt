@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.util.Log
 import com.khushi.conduit.MainActivity
 import com.khushi.conduit.R
+import com.khushi.conduit.core.link.HotspotRequestGate
 import com.khushi.conduit.core.protocol.ActionName
 import com.khushi.conduit.core.protocol.DeviceInfo
 import com.khushi.conduit.core.protocol.DeviceSnapshot
@@ -23,6 +24,7 @@ import com.khushi.conduit.core.protocol.HandshakeIntent
 import com.khushi.conduit.core.protocol.LinkSessionInfo
 import com.khushi.conduit.core.protocol.Outcome
 import com.khushi.conduit.core.protocol.ProtocolError
+import com.khushi.conduit.system.SystemScreen
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -47,6 +49,8 @@ class LinkService : Service() {
 
     private lateinit var macs: LinkedMacs
     private lateinit var discovery: MacDiscovery
+    private lateinit var beacon: HotspotBeacon
+    private val hotspotGate = HotspotRequestGate()
     private var worker: Thread? = null
     @Volatile private var running = false
     private val wake = Object()
@@ -65,9 +69,16 @@ class LinkService : Service() {
         super.onCreate()
         macs = LinkedMacs(this)
         discovery = MacDiscovery(this) { publishFound() }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
+        beacon = HotspotBeacon(this, ::hotspotRequested)
+        val notifications = getSystemService(NotificationManager::class.java)
+        notifications.createNotificationChannel(
             NotificationChannel(CHANNEL, "Conduit Link", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "Shows while this phone is linked to a Mac, or looking for one."
+            },
+        )
+        notifications.createNotificationChannel(
+            NotificationChannel(HOTSPOT_CHANNEL, "Hotspot requests", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "When your linked Mac is offline and asks for this phone's hotspot."
             },
         )
         instance = this
@@ -94,6 +105,7 @@ class LinkService : Service() {
 
         discovery.start()
         publishLinked()
+        updateBeacon()
         if (worker == null) {
             running = true
             worker = Thread(::loop, "conduit-link").also { it.start() }
@@ -104,6 +116,7 @@ class LinkService : Service() {
 
     override fun onDestroy() {
         running = false
+        beacon.stop()
         connection?.close()
         stopHeartbeat()
         discovery.stop()
@@ -256,6 +269,44 @@ class LinkService : Service() {
         heartbeat = null
     }
 
+    // Hotspot on request
+
+    /**
+     * Listen for a paired Mac asking for the hotspot: with a paired Mac, the
+     * person's say-so and Android's Nearby devices permission. MEASURED in
+     * design: waiting for the link to drop first raced the Mac, which asks
+     * five seconds after losing its network while this phone can take a
+     * heartbeat or more to notice — so it listens whenever it may be asked.
+     */
+    private fun updateBeacon() {
+        val wanted = HotspotRequests.enabled(this) && macs.all().isNotEmpty()
+        if (wanted) beacon.start() else beacon.stop()
+        LinkHub.update { it.copy(hotspotRequestsReady = wanted && beacon.canRun) }
+    }
+
+    private fun hotspotRequested(request: ByteArray) {
+        val paired = macs.all()
+        val macId = hotspotGate.check(request, KeystoreSigner.get().deviceId,
+            paired.associate { it.id to it.identityKeyBytes }) ?: return
+        val mac = paired.first { it.id == macId }
+        Log.i(TAG, "a paired Mac asked for the hotspot")
+
+        // Android does not let an app turn the hotspot on; the notification
+        // opens the switch, and the Mac rejoins the hotspot it remembers.
+        val settings = SystemScreen.HOTSPOT.intent(this) ?: return
+        val open = PendingIntent.getActivity(this, 2, settings, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        getSystemService(NotificationManager::class.java).notify(HOTSPOT_NOTIFICATION_ID,
+            Notification.Builder(this, HOTSPOT_CHANNEL)
+                .setSmallIcon(R.drawable.ic_link)
+                .setContentTitle("${mac.name} wants your hotspot")
+                .setContentText("Tap to turn Mobile Hotspot on. Your Mac joins it by itself.")
+                .setContentIntent(open)
+                .addAction(Notification.Action.Builder(null, "Turn on", open).build())
+                .setAutoCancel(true)
+                .setTimeoutAfter(2 * 60_000L)
+                .build())
+    }
+
     // Plumbing
 
     private fun publishLinked() = LinkHub.update { it.copy(linked = macs.all().sortedByDescending(LinkedMac::lastSeen)) }
@@ -290,6 +341,8 @@ class LinkService : Service() {
         private const val TAG = "ConduitLink"
         private const val CHANNEL = "link"
         private const val NOTIFICATION_ID = 7
+        private const val HOTSPOT_CHANNEL = "hotspot"
+        private const val HOTSPOT_NOTIFICATION_ID = 8
         private const val ACTION_PAIR = "com.khushi.conduit.link.PAIR"
         private const val ACTION_STOP = "com.khushi.conduit.link.STOP"
         private const val EXTRA_ID = "id"
@@ -331,6 +384,7 @@ class LinkService : Service() {
             instance?.let { service ->
                 if (LinkHub.state.value.connectedId == id) service.connection?.close()
                 service.publishLinked()
+                service.updateBeacon()
             } ?: LinkHub.update { it.copy(linked = LinkedMacs(context).all()) }
         }
 
@@ -341,6 +395,11 @@ class LinkService : Service() {
             if (linked.isNotEmpty() && instance == null) {
                 context.startForegroundService(Intent(context, LinkService::class.java))
             }
+        }
+
+        /** The person turned hotspot requests on or off, or allowed Nearby devices. */
+        fun refreshBeacon() {
+            instance?.updateBeacon()
         }
 
         /** A Mac just said where it is: try it now rather than after the backoff. */

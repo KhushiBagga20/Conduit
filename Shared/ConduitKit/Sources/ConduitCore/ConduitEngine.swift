@@ -19,6 +19,7 @@ import ConduitMedia
 import ConduitProtocol
 import ConduitState
 import Foundation
+import Network
 
 public final class ConduitEngine: ConduitCommands {
 
@@ -39,6 +40,12 @@ public final class ConduitEngine: ConduitCommands {
     private var pairingConnection: LinkConnection?
     /// Phones with a live Conduit Link connection right now.
     private var linkedNow: Set<String> = []
+    private let hotspotRequester = HotspotRequester()
+    private var networkMonitor: NWPathMonitor?
+    private var offlineSince: Date?
+    private var lastAutomaticHotspotAsk = Date.distantPast
+    /// Automatic asks in the current offline spell: the first, and one retry.
+    private var automaticAsks = 0
 
     private var attached: [String: AttachedTransport] = [:]
     private var known: [String: KnownPhone] = [:]
@@ -371,6 +378,99 @@ public final class ConduitEngine: ConduitCommands {
         linkServer = server
         server.start()
         publishLinkedPhones()
+        watchForGoingOffline()
+    }
+
+    // MARK: - Hotspot on request
+
+    public func requestPhoneHotspot() {
+        askForHotspot(automatically: false)
+    }
+
+    /// Ask every linked phone over Bluetooth to turn its hotspot on. Android
+    /// does not let an app do that itself, so the phone shows a notification
+    /// that opens the switch; this Mac then rejoins the hotspot it remembers.
+    private func askForHotspot(automatically: Bool) {
+        guard let identity = linkIdentity, let trust = linkTrust, !hotspotRequester.isAsking else { return }
+        let phones = trust.peers.values.filter { $0.platform == .android }
+        guard !phones.isEmpty else {
+            if !automatically {
+                store.record(ActivityEvent(kind: .error, title: "Link a phone first",
+                                           detail: "Conduit asks a linked phone for its hotspot."))
+            }
+            return
+        }
+        let requests = phones.compactMap { try? HotspotRequest.make(identity: identity, phoneID: $0.id) }
+        store.link.hotspotRequest = .asking
+
+        hotspotRequester.ask(requests) { [weak self] outcome in
+            guard let self else { return }
+            switch outcome {
+            case .asked:
+                store.link.hotspotRequest = .asked(Date())
+                store.record(ActivityEvent(kind: .phoneConnected, title: "Asked your phone for its hotspot",
+                                           detail: "Tap the notification on the phone to turn it on."))
+            case .noPhoneNearby:
+                store.link.hotspotRequest = .noPhoneNearby
+                // Asking the moment the network goes can beat the phone to
+                // it; give it one more chance while this Mac is still offline.
+                if automatically, automaticAsks < 2 {
+                    automaticAsks += 1
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+                        guard let self, offlineSince != nil else { return }
+                        askForHotspot(automatically: true)
+                    }
+                }
+                if !automatically {
+                    store.record(ActivityEvent(kind: .error, title: "No linked phone is nearby",
+                                               detail: "Keep the phone close, with Bluetooth on and Conduit for Android set up."))
+                }
+            case .bluetoothOff:
+                store.link.hotspotRequest = .bluetoothOff
+                if !automatically { store.record(ActivityEvent(kind: .error, title: "Turn on Bluetooth to ask your phone")) }
+            case .bluetoothDenied:
+                store.link.hotspotRequest = .bluetoothDenied
+                store.record(ActivityEvent(
+                    kind: .permissionRequired, title: "Let Conduit use Bluetooth",
+                    detail: "Allow Conduit in System Settings → Privacy & Security → Bluetooth."))
+            case .failed(let message):
+                store.link.hotspotRequest = .failed(message)
+                if !automatically { store.record(ActivityEvent(kind: .error, title: "Couldn't ask your phone", detail: message)) }
+            }
+        }
+    }
+
+    /// When this Mac loses its network, ask a linked phone for its hotspot —
+    /// the way an iPhone offers its hotspot to its Mac. A network change looks
+    /// offline for a moment, so it waits five seconds, and asks at most once
+    /// every ten minutes so the phone is not pestered.
+    private func watchForGoingOffline() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let online = path.status == .satisfied
+            Task { @MainActor [weak self] in self?.networkChanged(online: online) }
+        }
+        monitor.start(queue: .main)
+        networkMonitor = monitor
+    }
+
+    private func networkChanged(online: Bool) {
+        guard !online else {
+            offlineSince = nil
+            automaticAsks = 0
+            return
+        }
+        guard offlineSince == nil else { return }
+        let since = Date()
+        offlineSince = since
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, offlineSince == since, store.preferences.askPhoneForHotspot,
+                  Date().timeIntervalSince(lastAutomaticHotspotAsk) > 600
+            else { return }
+            lastAutomaticHotspotAsk = Date()
+            automaticAsks = 1
+            askForHotspot(automatically: true)
+        }
     }
 
     public func openLinkPairing() {
@@ -565,8 +665,10 @@ public final class ConduitEngine: ConduitCommands {
                     CoreLog.devices.error("could not read a phone's properties after \(failures) attempts")
                     return
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + Double(failures)) { [weak self] in
-                    guard let self, self.attached[serial]?.device.isReady == true,
+                // The engine lives as long as the app; the task holding it
+                // already keeps it, so the retry can too.
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(failures)) {
+                    guard self.attached[serial]?.device.isReady == true,
                           self.attached[serial]?.properties == nil else { return }
                     self.loadProperties(serial: serial)
                 }

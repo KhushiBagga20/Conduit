@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import com.khushi.conduit.core.design.DesignTokens
 import com.khushi.conduit.core.protocol.Availability
 import com.khushi.conduit.core.protocol.FeatureId
+import com.khushi.conduit.link.HotspotBeacon
+import com.khushi.conduit.link.HotspotRequests
 import com.khushi.conduit.link.LinkHub
 import com.khushi.conduit.link.LinkService
 import com.khushi.conduit.system.PhoneSetup
@@ -112,6 +114,16 @@ fun MacsScreen() {
         LinkService.startAdding(context)
     }
 
+    fun nearbyGranted() = HotspotBeacon.NEEDED.all {
+        context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
+    }
+    var hotspotRequests by remember { mutableStateOf(HotspotRequests.enabled(context) && nearbyGranted()) }
+    val nearby = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        val granted = results.values.all { it }
+        HotspotRequests.setEnabled(context, granted)
+        hotspotRequests = granted
+    }
+
     MacsContent(
         phone = rememberPhoneSettings(),
         hotspotAddress = rememberHotspotAddress(),
@@ -129,7 +141,16 @@ fun MacsScreen() {
             confirmPairing = LinkService::confirmPairing,
             rejectPairing = LinkService::rejectPairing,
             unlink = { LinkService.unlink(context, it) },
+            setHotspotRequests = { on ->
+                if (on && !nearbyGranted()) {
+                    nearby.launch(HotspotBeacon.NEEDED)
+                } else {
+                    HotspotRequests.setEnabled(context, on)
+                    hotspotRequests = on
+                }
+            },
         ),
+        hotspotRequests = hotspotRequests,
         onOpen = { it.open(context) },
     )
 }
@@ -142,6 +163,7 @@ class MacsActions(
     val confirmPairing: () -> Unit = {},
     val rejectPairing: () -> Unit = {},
     val unlink: (String) -> Unit = {},
+    val setHotspotRequests: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -151,9 +173,10 @@ fun MacsContent(
     link: LinkHub.State,
     actions: MacsActions,
     onOpen: (SystemScreen) -> Unit,
+    hotspotRequests: Boolean = false,
 ) {
     ScreenColumn("Macs") {
-        LinkedMacsSection(link, actions)
+        LinkedMacsSection(link, actions, hotspotRequests)
 
         SectionLabel("Mirroring from Conduit for Mac")
         PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
@@ -179,7 +202,7 @@ fun MacsContent(
  * digits both people compare before either device trusts the other.
  */
 @Composable
-private fun LinkedMacsSection(link: LinkHub.State, actions: MacsActions) {
+private fun LinkedMacsSection(link: LinkHub.State, actions: MacsActions, hotspotRequests: Boolean) {
     val canvas = LocalCanvas.current
 
     if (link.linked.isEmpty() && !link.adding) {
@@ -212,6 +235,19 @@ private fun LinkedMacsSection(link: LinkHub.State, actions: MacsActions) {
                     TextButton(onClick = { actions.unlink(mac.id) }) { Text("Unlink", color = canvas.contentSecondary) }
                 }
             }
+        }
+        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+            SwitchRow(
+                icon = Icons.Rounded.WifiTethering,
+                title = "Let your Mac ask for the hotspot",
+                supporting = when {
+                    !hotspotRequests -> "When your Mac is offline it can ask over Bluetooth, and you get a notification to turn the hotspot on."
+                    link.hotspotRequestsReady -> "Listening over Bluetooth. Only your linked Mac can ask."
+                    else -> "Starts listening once Bluetooth is on. Only your linked Mac can ask."
+                },
+                checked = hotspotRequests,
+                onCheckedChange = actions.setHotspotRequests,
+            )
         }
         if (!link.adding) {
             PillButton("Add another Mac", icon = Icons.Rounded.Add, modifier = Modifier.fillMaxWidth(), onClick = actions.addMac)

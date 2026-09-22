@@ -26,6 +26,11 @@
   which is granted at install. POST_NOTIFICATIONS is asked for when a Mac is
   added, so the "Linked to" notification can show. MacHint, like the lease,
   accepts only senders holding WRITE_SECURE_SETTINGS.
+
+  BLUETOOTH_ADVERTISE and BLUETOOTH_CONNECT ("Nearby devices") let a paired
+  Mac ask for this phone's hotspot when the Mac is offline. The advert
+  carries only Conduit's service UUID, and only a request signed by a paired
+  Mac and addressed to this phone shows a notification.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
@@ -39,6 +44,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- The hotspot switch, opened straight from the request notification. -->
+    <queries>
+        <intent>
+            <action android:name="com.android.settings.TETHER_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.WIRELESS_SETTINGS" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"

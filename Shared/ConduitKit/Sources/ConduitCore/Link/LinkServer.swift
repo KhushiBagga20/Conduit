@@ -74,7 +74,7 @@ final class LinkServer {
                 txtRecord: NWTXTRecord(["id": identity.deviceID, "v": String(ProtocolVersion.current)]))
         }
 
-        listener.stateUpdateHandler = { state in
+        listener.stateUpdateHandler = { [weak self] state in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 switch state {
@@ -108,7 +108,7 @@ final class LinkServer {
             }
         }
 
-        listener.newConnectionHandler = { connection in
+        listener.newConnectionHandler = { [weak self] connection in
             Task { @MainActor [weak self] in self?.accept(connection) }
         }
 
@@ -128,7 +128,7 @@ final class LinkServer {
     /// taken, and fell back to a random one for no reason.
     private func restart(after old: NWListener, _ start: @escaping (LinkServer) -> Void) {
         old.newConnectionHandler = nil
-        old.stateUpdateHandler = { state in
+        old.stateUpdateHandler = { [weak self] state in
             guard case .cancelled = state else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }

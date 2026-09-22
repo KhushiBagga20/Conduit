@@ -68,6 +68,22 @@ struct DevicesPage: View {
                 }
             }
 
+            if !store.link.phones.isEmpty {
+                LabeledContent {
+                    Button("Ask Now") { store.commands?.requestPhoneHotspot() }
+                        .disabled(store.link.hotspotRequest == .asking)
+                } label: {
+                    Text("Ask for the phone's hotspot")
+                    Text(store.link.hotspotRequest.detail)
+                }
+                Toggle(isOn: Binding(
+                    get: { store.preferences.askPhoneForHotspot },
+                    set: { value in store.commands?.updatePreferences { $0.askPhoneForHotspot = value } })) {
+                    Text("Ask automatically when this Mac goes offline")
+                    Text("Over Bluetooth, at most once every ten minutes. The phone shows a notification to turn its hotspot on.")
+                }
+            }
+
             LabeledContent {
                 if store.link.isPairingOpen {
                     Button("Stop") { store.commands?.closeLinkPairing() }
