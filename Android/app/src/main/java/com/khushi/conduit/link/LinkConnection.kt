@@ -19,6 +19,8 @@ import java.io.IOException
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /**
  * One connection from this phone to a Mac: the socket, the frames, the
@@ -27,6 +29,11 @@ import java.net.Socket
  * [run] blocks its thread until the connection ends, so callers give it one.
  * The two hellos are plaintext; everything after is sealed, and a frame that
  * does not open ends the connection rather than being guessed at.
+ *
+ * Every write and every change to the handshake happens on one worker
+ * thread. MEASURED: tapping Pair confirmed from the UI thread, and Android
+ * ends an app that touches the network there (NetworkOnMainThreadException).
+ * One thread also keeps the sealed frames' counters in the order they go out.
  */
 class LinkConnection(
     signer: LinkSigner,
@@ -44,6 +51,7 @@ class LinkConnection(
     }
 
     private val handshake = PhoneHandshake(signer, device, intent, expectedMacKey)
+    private val worker = Executors.newSingleThreadExecutor { Thread(it, "conduit-link-writer") }
     private val socket = Socket()
     private val decoder = FrameDecoder()
     private var output: OutputStream? = null
@@ -62,16 +70,16 @@ class LinkConnection(
             // missed heartbeats means the Mac has gone.
             socket.soTimeout = 60_000
             output = socket.getOutputStream()
-            perform(handshake.start())
+            onWorker { perform(handshake.start()) }
 
             val input = socket.getInputStream()
             val buffer = ByteArray(64 * 1024)
             while (!closed) {
                 val count = input.read(buffer)
                 if (count < 0) break
+                // Frames are decoded here, in order, and handled on the worker.
                 for (frame in decoder.receive(buffer.copyOf(count))) {
-                    if (closed) break
-                    handle(frame)
+                    onWorker { if (!closed) handle(frame) }
                 }
             }
         } catch (error: IOException) {
@@ -85,13 +93,21 @@ class LinkConnection(
         }
     }
 
-    fun confirmPairing() = perform(handshake.confirmPairing())
+    /** Safe from any thread, including the UI's. */
+    fun confirmPairing() = onWorker { perform(handshake.confirmPairing()) }
 
-    fun rejectPairing() = perform(handshake.rejectPairing())
+    fun rejectPairing() = onWorker { perform(handshake.rejectPairing()) }
 
-    fun send(envelope: Envelope) {
-        if (!ready) return
-        send(envelope.encode().encodeToByteArray(), ControlType.ENVELOPE, sealed = true)
+    fun send(envelope: Envelope) = onWorker {
+        if (ready) send(envelope.encode().encodeToByteArray(), ControlType.ENVELOPE, sealed = true)
+    }
+
+    private fun onWorker(task: () -> Unit) {
+        try {
+            worker.execute(task)
+        } catch (_: RejectedExecutionException) {
+            // The connection has ended; there is nothing left to do.
+        }
     }
 
     /** Heartbeat interval agreed at ready; reads give up after three missed. */
@@ -171,6 +187,7 @@ class LinkConnection(
     private fun finish() {
         closed = true
         runCatching { socket.close() }
+        worker.shutdown()
         listener.onClosed(closeError)
     }
 
