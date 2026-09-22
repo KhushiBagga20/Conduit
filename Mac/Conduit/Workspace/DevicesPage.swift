@@ -159,12 +159,6 @@ struct DevicesPage: View {
                     Text("Lets Conduit for Android turn Wireless debugging on and keep the phone awake while charging, so wireless mirroring stays reachable.")
                 }
             }
-            LabeledContent {
-                AvailabilityLabel(availability: .planned)
-            } label: {
-                Text("Pair with this Mac")
-                Text("For link sharing, calls and using the phone as a trackpad.")
-            }
         } header: {
             Text("Conduit for Android")
         }
