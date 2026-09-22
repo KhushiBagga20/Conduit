@@ -38,12 +38,6 @@ class TouchGuardService : AccessibilityService() {
     private var controller: TouchInteractionController? = null
     private var receiverRegistered = false
 
-    /** Registered as the only callback, so the framework hands every touch here and nowhere else. */
-    private val swallowTouches = object : TouchInteractionController.Callback {
-        override fun onMotionEvent(event: MotionEvent) = Unit
-        override fun onStateChanged(state: Int) = Unit
-    }
-
     /** The power button means someone has the phone in hand. */
     private val powerButton = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = standDown("power button")
@@ -71,8 +65,14 @@ class TouchGuardService : AccessibilityService() {
             return
         }
 
+        // Registered as the only callback, so the framework hands every touch
+        // here and nowhere else. Made only now: Android 12 has no such class,
+        // and a field holding one would crash the service before this check.
         controller = getTouchInteractionController(Display.DEFAULT_DISPLAY).also {
-            it.registerCallback(mainExecutor, swallowTouches)
+            it.registerCallback(mainExecutor, object : TouchInteractionController.Callback {
+                override fun onMotionEvent(event: MotionEvent) = Unit
+                override fun onStateChanged(state: Int) = Unit
+            })
         }
         val filter = IntentFilter(Intent.ACTION_SCREEN_OFF).apply { addAction(Intent.ACTION_SCREEN_ON) }
         registerReceiver(powerButton, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -105,7 +105,7 @@ class TouchGuardService : AccessibilityService() {
 
     private fun tearDown() {
         handler.removeCallbacks(leaseCheck)
-        controller?.unregisterAllCallbacks()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) controller?.unregisterAllCallbacks()
         controller = null
         if (receiverRegistered) {
             unregisterReceiver(powerButton)
