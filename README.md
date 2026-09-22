@@ -9,10 +9,12 @@ Android app, a menu bar utility and a full Mac workspace that all share one
 connection.
 
 > **Status: early development.** Conduit for Mac mirrors and controls a
-> phone over USB or Wireless debugging — verified on a Galaxy S24 Ultra,
-> including carrying on over Wi-Fi when the cable is pulled. Pairing with
-> Conduit for Android, link sharing, calls and the trackpad are planned. See
-> the [roadmap](Documentation/Roadmap.md) and
+> phone over USB, Wireless debugging or the phone's own hotspot — verified on
+> a Galaxy S24 Ultra, including carrying on over Wi-Fi when the cable is
+> pulled. Conduit for Android pairs with the Mac over Conduit Link, shares
+> links both ways, and lets the Mac ask for its hotspot over Bluetooth.
+> Files, notifications, calls and the trackpad are planned. See the
+> [roadmap](Documentation/Roadmap.md) and
 > [measurements](Documentation/Measurements.md).
 
 ## One product, three interfaces

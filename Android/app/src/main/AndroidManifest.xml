@@ -27,6 +27,10 @@
   added, so the "Linked to" notification can show. MacHint, like the lease,
   accepts only senders holding WRITE_SECURE_SETTINGS.
 
+  "Send to Mac" in the share sheet sends the web link in shared text to the
+  linked Mac, which opens it; links from the Mac arrive as a notification
+  that opens them here. Neither keeps the link, and only its site is shown.
+
   BLUETOOTH_ADVERTISE and BLUETOOTH_CONNECT ("Nearby devices") let a paired
   Mac ask for this phone's hotspot when the Mac is offline. The advert
   carries only Conduit's service UUID, and only a request signed by a paired
@@ -73,6 +77,21 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".link.ShareToMacActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/share_to_mac"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
 

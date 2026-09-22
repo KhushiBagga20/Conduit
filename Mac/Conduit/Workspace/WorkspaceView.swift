@@ -40,7 +40,8 @@ struct WorkspaceView: View {
         case .activity: ActivityPage()
         case .devices: DevicesPage()
         case .settings: SettingsForm().navigationTitle("Settings")
-        case .trackpad, .camera, .calls, .links:
+        case .links: LinksPage()
+        case .trackpad, .camera, .calls:
             PlannedFeaturePage(section: section)
         }
     }
@@ -83,7 +84,7 @@ private struct Sidebar: View {
 
         if section == .phoneScreen, store.mirroring.status.isActive {
             label.badge(Text(store.mirroring.status == .running ? "Live" : "…"))
-        } else if let feature = section.feature, store.activePhone.map({ $0.availability(feature) }) ?? .planned == .planned {
+        } else if let feature = section.feature, store.availability(feature) == .planned {
             label.badge(Text("Planned"))
         } else {
             label

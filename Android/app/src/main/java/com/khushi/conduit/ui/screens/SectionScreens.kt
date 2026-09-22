@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.LaptopMac
+import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Coffee
 import androidx.compose.material.icons.rounded.DeveloperMode
 import androidx.compose.material.icons.rounded.PrivacyTip
@@ -248,6 +249,21 @@ private fun LinkedMacsSection(link: LinkHub.State, actions: MacsActions, hotspot
                 checked = hotspotRequests,
                 onCheckedChange = actions.setHotspotRequests,
             )
+        }
+        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconBubble(Icons.Rounded.Link)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Send links", color = canvas.content, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "In any app, tap Share, then Send to Mac, and the link opens on your Mac. Links your Mac " +
+                            "sends arrive here as a notification.",
+                        color = canvas.contentSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
         }
         if (!link.adding) {
             PillButton("Add another Mac", icon = Icons.Rounded.Add, modifier = Modifier.fillMaxWidth(), onClick = actions.addMac)

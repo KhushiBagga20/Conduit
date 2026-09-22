@@ -168,7 +168,6 @@ struct MenuBarPanel: View {
     private var actions: some View {
         let status = store.mirroring.status
         let controlReady = store.mirroring.session?.control.state == .connected
-        let phone = store.activePhone
 
         return VStack(alignment: .leading, spacing: 0) {
             MenuDivider()
@@ -187,6 +186,11 @@ struct MenuBarPanel: View {
                 store.commands?.sendMacClipboardToPhone()
             }
             if !store.link.phones.isEmpty {
+                MenuRow("Send Link to Phone", systemImage: "link",
+                        trailing: store.link.linkSend.shortStatus ?? (store.link.hasConnectedPhone ? nil : "Not connected"),
+                        isEnabled: store.link.hasConnectedPhone && !store.link.linkSend.isSending) {
+                    store.commands?.sendLinkToPhone()
+                }
                 MenuRow("Use Phone Hotspot", systemImage: "personalhotspot",
                         trailing: store.link.hotspotRequest.shortStatus,
                         isEnabled: store.link.hotspotRequest != .asking) {
@@ -197,7 +201,7 @@ struct MenuBarPanel: View {
             MenuSectionHeader("Coming to Conduit")
             ForEach(plannedActions, id: \.title) { action in
                 MenuRow(action.title, systemImage: action.symbol,
-                        trailing: (phone?.availability(action.feature) ?? .planned).label, isEnabled: false) {}
+                        trailing: store.availability(action.feature).label, isEnabled: false) {}
             }
         }
     }
@@ -206,7 +210,6 @@ struct MenuBarPanel: View {
         [
             ("Use Phone as Trackpad", "hand.point.up.left", .trackpad),
             ("Use Phone Camera", "camera", .camera),
-            ("Share Link", "link", .links),
             ("Call from Phone", "phone", .calls),
             ("Find My Mac", "laptopcomputer", .findMac),
         ]

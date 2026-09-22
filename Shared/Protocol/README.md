@@ -274,6 +274,15 @@ Snapshot     { device: DeviceInfo, battery?: Battery, network?: Network, locked?
 | `call.mute` | command | Mac → phone | `{ muted }` — may fail with `unsupported` |
 | `mac.find` | command | phone → Mac | `{}` — the Mac plays a sound until dismissed |
 
+**Links.** `link.send` carries only `http` and `https` URLs, at most 2,048
+characters, with a host. The receiver checks this itself and answers
+`invalid_request` for anything else, without opening it — so a paired device
+cannot use a link to launch other apps. The Mac opens a link it accepts in the
+default browser; the phone, which Android does not let open screens from the
+background, shows a notification that opens it. A receiver set not to take
+links, or with no way to show one, answers `permission_denied`. Neither side
+keeps or logs the link; the interfaces show only its site.
+
 ## 7. Binary channels
 
 Same layouts as the measured trackpad prototype.

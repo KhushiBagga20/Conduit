@@ -10,6 +10,17 @@ import ConduitProtocol
 import ConduitState
 import SwiftUI
 
+extension ConduitStore {
+    /// What a feature can offer now. Link sharing travels over Conduit Link,
+    /// so it depends on a linked phone being connected rather than on adb.
+    func availability(_ feature: FeatureID) -> Availability {
+        switch feature {
+        case .links: link.hasConnectedPhone ? .available : .requiresSetup
+        default: activePhone?.availability(feature) ?? .planned
+        }
+    }
+}
+
 extension PhoneDevice {
     var statusTone: StatusTone {
         switch connection {
@@ -119,7 +130,7 @@ extension FeatureID {
         case .trackpad: "Turn the phone into a trackpad for this Mac. Arrives with Conduit for Android."
         case .camera: "Use the phone's cameras inside Conduit. Needs Android 12."
         case .calls: "Answer, decline and place calls from this Mac. Call audio stays on the phone."
-        case .links: "Send links between this Mac and the phone. Arrives with Conduit for Android."
+        case .links: "Send web links between this Mac and the phone over Conduit Link."
         case .files: "Send files between this Mac and the phone."
         case .notifications: "See the phone's notifications on this Mac."
         case .findMac: "Ring this Mac from the phone. Arrives with Conduit for Android."

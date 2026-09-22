@@ -8,11 +8,16 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Uri
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
+import android.widget.Toast
 import com.khushi.conduit.MainActivity
 import com.khushi.conduit.R
 import com.khushi.conduit.core.link.HotspotRequestGate
+import com.khushi.conduit.core.link.LinkSharing
 import com.khushi.conduit.core.protocol.ActionName
 import com.khushi.conduit.core.protocol.DeviceInfo
 import com.khushi.conduit.core.protocol.DeviceSnapshot
@@ -26,15 +31,19 @@ import com.khushi.conduit.core.protocol.Outcome
 import com.khushi.conduit.core.protocol.ProtocolError
 import com.khushi.conduit.system.SystemScreen
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Keeps this phone linked to the Macs it paired with, and runs pairing when
@@ -58,6 +67,14 @@ class LinkService : Service() {
     @Volatile private var connection: LinkConnection? = null
     @Volatile private var pendingPair: LinkHub.FoundMac? = null
     private var heartbeat: ScheduledExecutorService? = null
+    @Volatile private var statusText = "Looking for your Mac"
+
+    private val main = Handler(Looper.getMainLooper())
+    /** A shared link waiting for the Mac to be linked: in memory only, and only briefly. */
+    private val queuedLink = AtomicReference<String?>(null)
+    /** Links sent to the Mac and not answered yet: request ID to the Mac's name. */
+    private val sentLinks = ConcurrentHashMap<String, String>()
+    private val linkNotifications = AtomicInteger(0)
 
     /** A new epoch each time this process starts, as the spec asks for events. */
     private val epoch = UUID.randomUUID().toString()
@@ -81,11 +98,16 @@ class LinkService : Service() {
                 description = "When your linked Mac is offline and asks for this phone's hotspot."
             },
         )
+        notifications.createNotificationChannel(
+            NotificationChannel(LINKS_CHANNEL, "Links from your Mac", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Links your Mac sends to this phone. Tap one to open it."
+            },
+        )
         instance = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, notification("Looking for your Mac"),
+        startForeground(NOTIFICATION_ID, notification(statusText),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
 
         when (intent?.action) {
@@ -101,6 +123,7 @@ class LinkService : Service() {
                     connection?.close()
                 }
             }
+            ACTION_SEND_LINK -> intent.getStringExtra(EXTRA_URL)?.let(::sendOrQueueLink)
         }
 
         discovery.start()
@@ -116,6 +139,8 @@ class LinkService : Service() {
 
     override fun onDestroy() {
         running = false
+        main.removeCallbacksAndMessages(null)
+        queuedLink.set(null)
         beacon.stop()
         connection?.close()
         stopHeartbeat()
@@ -205,6 +230,10 @@ class LinkService : Service() {
                     startHeartbeat(connection, session.heartbeatSeconds)
                     sendSnapshot(connection)
                     Log.i(TAG, "linked")
+                    queuedLink.getAndSet(null)?.let { link ->
+                        main.removeCallbacks(giveUpOnQueuedLink)
+                        sendLink(connection, link, mac.name)
+                    }
                 }
 
                 override fun onEnvelope(connection: LinkConnection, envelope: Envelope) = handle(connection, envelope)
@@ -238,12 +267,109 @@ class LinkService : Service() {
             is EnvelopeKind.Command -> when (kind.action) {
                 ActionName.SESSION_PING -> connection.send(Envelope(EnvelopeKind.Response(kind.requestId, Outcome.Success), envelope.payload))
                 ActionName.STATE_SYNC -> sendSnapshot(connection)
+                ActionName.LINK_SEND -> linkFromMac(connection, kind.requestId, envelope)
                 else -> connection.send(Envelope(EnvelopeKind.Response(kind.requestId, Outcome.Failure(
                     ProtocolError(ErrorCode.UNSUPPORTED, "This version of Conduit for Android does not do that yet."),
                 ))))
             }
-            is EnvelopeKind.Response, is EnvelopeKind.Event -> Unit
+            is EnvelopeKind.Response -> sentLinks.remove(kind.requestId)?.let { mac -> linkAnswered(mac, kind.outcome) }
+            is EnvelopeKind.Event -> Unit
         }
+    }
+
+    // Links
+
+    /**
+     * The Mac sent a link. Android does not let a service open an app by
+     * itself, so the link waits in a notification; only its site is shown.
+     */
+    private fun linkFromMac(connection: LinkConnection, requestId: String, envelope: Envelope) {
+        val url = (envelope.payload?.get("url") as? JsonPrimitive)?.takeIf { it.isString }?.content
+            ?.let(LinkSharing::acceptableUrl)
+        val outcome = when {
+            url == null -> Outcome.Failure(ProtocolError(ErrorCode.INVALID_REQUEST, "Only web links can be opened."))
+            !canNotify(LINKS_CHANNEL) -> Outcome.Failure(ProtocolError(ErrorCode.PERMISSION_DENIED,
+                "Notifications from Conduit are off on the phone, so the link can't be shown."))
+            else -> {
+                showLink(url, connectedMacName() ?: "your Mac")
+                Outcome.Success
+            }
+        }
+        Log.i(TAG, if (outcome is Outcome.Failure) "turned down a link from the Mac: ${outcome.error.code}" else "showed a link from the Mac")
+        connection.send(Envelope(EnvelopeKind.Response(requestId, outcome)))
+    }
+
+    private fun showLink(url: String, macName: String) {
+        // A few at a time, so a second link does not replace the first.
+        val id = LINK_NOTIFICATION_BASE + linkNotifications.getAndIncrement() % 20
+        val view = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val open = PendingIntent.getActivity(this, id, view, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        getSystemService(NotificationManager::class.java).notify(id,
+            Notification.Builder(this, LINKS_CHANNEL)
+                .setSmallIcon(R.drawable.ic_link)
+                .setContentTitle("Link from $macName")
+                .setContentText("${LinkSharing.siteName(url)} · Tap to open")
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build())
+    }
+
+    /** Send now if the Mac is linked; otherwise wait a little for the link to come up. */
+    private fun sendOrQueueLink(url: String) {
+        val link = connection
+        val mac = connectedMacName()
+        if (link != null && mac != null) {
+            sendLink(link, url, mac)
+            return
+        }
+        queuedLink.set(url)
+        main.removeCallbacks(giveUpOnQueuedLink)
+        main.postDelayed(giveUpOnQueuedLink, LINK_WAIT_MILLIS)
+        toast("Waiting for your Mac…")
+        wakeUp()
+    }
+
+    private val giveUpOnQueuedLink = Runnable {
+        if (queuedLink.getAndSet(null) != null) toast("Couldn't reach your Mac, so the link wasn't sent.")
+    }
+
+    private fun sendLink(connection: LinkConnection, url: String, macName: String) {
+        val requestId = UUID.randomUUID().toString()
+        sentLinks[requestId] = macName
+        connection.send(Envelope(EnvelopeKind.Command(requestId, ActionName.LINK_SEND), buildJsonObject { put("url", url) }))
+        Log.i(TAG, "sent a link to the Mac")
+        // The spec gives a command 15 seconds to be answered.
+        main.postDelayed({
+            sentLinks.remove(requestId)?.let { toast("$it didn't answer, so the link may not have opened.") }
+        }, 15_000L)
+    }
+
+    private fun linkAnswered(macName: String, outcome: Outcome) = when (outcome) {
+        Outcome.Success -> {
+            Log.i(TAG, "the Mac opened the link")
+            toast("Opened on $macName")
+        }
+        is Outcome.Failure -> {
+            Log.i(TAG, "the Mac turned down the link: ${outcome.error.code}")
+            toast("$macName didn't open the link. ${outcome.error.message}")
+        }
+    }
+
+    private fun connectedMacName(): String? {
+        val state = LinkHub.state.value
+        return state.connectedId?.let { id -> state.linked.firstOrNull { it.id == id }?.name }
+    }
+
+    private fun canNotify(channel: String): Boolean {
+        val notifications = getSystemService(NotificationManager::class.java)
+        return notifications.areNotificationsEnabled() &&
+            notifications.getNotificationChannel(channel)?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
+    private fun toast(text: String) {
+        main.post { Toast.makeText(applicationContext, text, Toast.LENGTH_SHORT).show() }
     }
 
     private fun sendSnapshot(connection: LinkConnection) {
@@ -322,8 +448,10 @@ class LinkService : Service() {
 
     private fun wakeUp() = synchronized(wake) { wake.notifyAll() }
 
-    private fun notify(text: String) =
+    private fun notify(text: String) {
+        statusText = text
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
+    }
 
     private fun notification(text: String): Notification {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
@@ -343,12 +471,17 @@ class LinkService : Service() {
         private const val NOTIFICATION_ID = 7
         private const val HOTSPOT_CHANNEL = "hotspot"
         private const val HOTSPOT_NOTIFICATION_ID = 8
+        private const val LINKS_CHANNEL = "links"
+        private const val LINK_NOTIFICATION_BASE = 100
+        private const val LINK_WAIT_MILLIS = 20_000L
         private const val ACTION_PAIR = "com.khushi.conduit.link.PAIR"
         private const val ACTION_STOP = "com.khushi.conduit.link.STOP"
+        private const val ACTION_SEND_LINK = "com.khushi.conduit.link.SEND_LINK"
         private const val EXTRA_ID = "id"
         private const val EXTRA_NAME = "name"
         private const val EXTRA_HOSTS = "hosts"
         private const val EXTRA_PORT = "port"
+        private const val EXTRA_URL = "url"
 
         @Volatile
         private var instance: LinkService? = null
@@ -368,6 +501,12 @@ class LinkService : Service() {
             context.startForegroundService(Intent(context, LinkService::class.java).setAction(ACTION_PAIR)
                 .putExtra(EXTRA_ID, mac.id).putExtra(EXTRA_NAME, mac.name)
                 .putStringArrayListExtra(EXTRA_HOSTS, ArrayList(mac.hosts)).putExtra(EXTRA_PORT, mac.port))
+        }
+
+        /** Send a web link to the linked Mac, which opens it, starting the link first if it is not running. */
+        fun sendLink(context: Context, url: String) {
+            context.startForegroundService(Intent(context, LinkService::class.java)
+                .setAction(ACTION_SEND_LINK).putExtra(EXTRA_URL, url))
         }
 
         fun confirmPairing() {

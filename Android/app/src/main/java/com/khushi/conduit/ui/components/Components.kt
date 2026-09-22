@@ -549,8 +549,8 @@ fun FeatureId.icon(): ImageVector = when (this) {
 fun FeatureId.title(): String =
     DesignTokens.Feature.all.firstOrNull { it.id == wire }?.title ?: wire
 
-/** Features that work today, through Conduit for Mac. The rest are planned. */
-val featuresAvailableToday = setOf(FeatureId.MIRRORING, FeatureId.REMOTE_INPUT, FeatureId.CLIPBOARD, FeatureId.AUDIO)
+/** Features that work today, with Conduit for Mac. The rest are planned. */
+val featuresAvailableToday = setOf(FeatureId.MIRRORING, FeatureId.REMOTE_INPUT, FeatureId.CLIPBOARD, FeatureId.AUDIO, FeatureId.LINKS)
 
 fun FeatureId.detail(): String = when (this) {
     FeatureId.MIRRORING -> "See and use this phone on your Mac"

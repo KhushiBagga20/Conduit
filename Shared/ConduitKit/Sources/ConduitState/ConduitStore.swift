@@ -56,6 +56,9 @@ public protocol ConduitCommands: AnyObject {
     /// Ask linked phones over Bluetooth to turn their hotspot on.
     func requestPhoneHotspot()
 
+    /// Send the web link on this Mac's clipboard to the linked phone.
+    func sendLinkToPhone()
+
     /// Conduit Link: pairing with a phone, and forgetting one.
     func openLinkPairing()
     func closeLinkPairing()
@@ -77,6 +80,8 @@ public nonisolated struct Preferences: Codable, Sendable, Equatable {
     /// When this Mac goes offline, ask a linked phone over Bluetooth to turn
     /// its hotspot on.
     public var askPhoneForHotspot = true
+    /// Open links a linked phone shares, in the default browser.
+    public var openLinksFromPhone = true
 
     public init() {}
 
@@ -90,6 +95,7 @@ public nonisolated struct Preferences: Codable, Sendable, Equatable {
         clipboardSync = try saved.decodeIfPresent(Bool.self, forKey: .clipboardSync) ?? true
         autoConnectWireless = try saved.decodeIfPresent(Bool.self, forKey: .autoConnectWireless) ?? true
         askPhoneForHotspot = try saved.decodeIfPresent(Bool.self, forKey: .askPhoneForHotspot) ?? true
+        openLinksFromPhone = try saved.decodeIfPresent(Bool.self, forKey: .openLinksFromPhone) ?? true
     }
 }
 

@@ -18,7 +18,7 @@ struct PlannedFeaturePage: View {
 
     var body: some View {
         let feature = section.feature ?? .trackpad
-        let availability = store.activePhone?.availability(feature) ?? .planned
+        let availability = store.availability(feature)
 
         ContentUnavailableView {
             Label(section.title, systemImage: section.symbol)

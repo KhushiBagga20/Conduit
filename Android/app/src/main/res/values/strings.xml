@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Conduit</string>
+    <string name="share_to_mac">Send to Mac</string>
     <string name="touch_guard_label">Conduit touch guard</string>
     <string name="touch_guard_description">Used by Conduit for Mac while it mirrors this phone with the screen off: touches on the phone are ignored and the Mac keeps control. It turns off when the screen comes back on, when you press the power button, or when the Mac stops mirroring. It does not read anything on the screen.</string>
 </resources>

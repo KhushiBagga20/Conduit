@@ -9,8 +9,8 @@ a real phone, and a report of what changed and what is still limited.
 | **1 · Foundation** | Workspace, protocol specification, design tokens, ConduitKit, proven media stack, Mac app with menu bar and workspace, Android skeleton | Done — two hands-on checks pending |
 | **2 · Mac workspace** | Full workspace UI, phone screen with all existing mirroring features, fit/fill, fullscreen, always-on-top, screenshot | Planned |
 | **3 · Menu bar** | Connection ownership, quick actions, notifications, launch at login, auto-connect | Planned |
-| **4 · Android** | Pairing, foreground service, home, Macs, features, settings, share target, trackpad | Planned |
-| **5 · Link sharing** | Android → Mac and Mac → Android, recents, notifications | Planned |
+| **4 · Android** | Pairing, foreground service, home, Macs, features, settings, share target, trackpad | In progress — all but the trackpad built and checked on the phone |
+| **5 · Link sharing** | Android → Mac and Mac → Android, recents, notifications | Done — checked both ways on the phone |
 | **6 · Calls** | Incoming call events, accept/decline/end, outgoing requests, permissions | Planned |
 | **7 · Polish and release** | Latency, reconnection, accessibility, shortcuts, icons, onboarding, packaging | Planned |
 
@@ -22,18 +22,18 @@ and Conduit for Mac. Mirroring will keep running over adb, because it needs
 shell privileges; everything else runs over Conduit Link, which needs none
 and works over any network the two share — including the phone's hotspot.
 
-| Stage | What it adds | Depends on |
-|---|---|---|
-| **A · Anywhere** | Reach the phone over its own hotspot, where Wireless debugging cannot go | — |
-| **B · Conduit Link** | The channel: Mac listener and Bonjour advert, phone client and foreground service, identity keys, pairing, sealed frames, heartbeat. Built on both sides; interop checked between Kotlin and the running Mac — pairing on the phone pending | A |
-| **C · Device state** | Battery, charging and network shown on the Mac from the phone itself, not from adb polling | B |
-| **D · Links** | Share a link from the phone to the Mac and back, from the share sheet and the menu bar | B |
-| **E · Find my Mac** | Ring this Mac from the phone | B |
-| **F · Files** | Send a file each way, over the link's file channel | B |
-| **G · Notifications** | Phone notifications on the Mac, opt-in per app, with dismiss | B |
-| **H · Phone as trackpad** | The phone's screen drives the Mac's pointer; needs macOS Accessibility permission | B |
-| **I · Calls** | Incoming call events on the Mac, and answer/decline where Android allows it | B, G |
-| **J · Camera** | The phone's camera in a Conduit window through scrcpy. Using it in other Mac apps needs a Camera Extension and a paid Apple Developer account | — |
+| Stage | What it adds | Depends on | Status |
+|---|---|---|---|
+| **A · Anywhere** | Reach the phone over its own hotspot, where Wireless debugging cannot go, and ask it for the hotspot over Bluetooth when the Mac is offline | — | Done — checked on the phone |
+| **B · Conduit Link** | The channel: Mac listener and Bonjour advert, phone client and foreground service, identity keys, pairing, sealed frames, heartbeat | A | Done — paired and linked on the phone, over its hotspot |
+| **C · Device state** | Battery, charging and network shown on the Mac from the phone itself, not from adb polling | B | Planned |
+| **D · Links** | Share a link from the phone to the Mac and back, from the share sheet and the menu bar | B | Done — checked both ways on the phone |
+| **E · Find my Mac** | Ring this Mac from the phone | B | Planned |
+| **F · Files** | Send a file each way, over the link's file channel | B | Planned |
+| **G · Notifications** | Phone notifications on the Mac, opt-in per app, with dismiss | B | Planned |
+| **H · Phone as trackpad** | The phone's screen drives the Mac's pointer; needs macOS Accessibility permission | B | Planned |
+| **I · Calls** | Incoming call events on the Mac, and answer/decline where Android allows it | B, G | Planned |
+| **J · Camera** | The phone's camera in a Conduit window through scrcpy. Using it in other Mac apps needs a Camera Extension and a paid Apple Developer account | — | Planned |
 
 Each stage ends the way every phase does: both apps build, the checks pass
 on the phone, and anything still limited is labelled in the UI rather than
@@ -56,8 +56,8 @@ hidden.
 | Android interface checked on the phone | Done |
 | Phone screen in its own window while mirroring | Built — hands-on check pending |
 | Redesigned Android interface (live Wi-Fi, battery and setup cards) | Rendered off-device in light and dark — check on the phone pending |
-| Phone screen off ignores touches | Built as a touch guard in Conduit for Android — check on the phone pending |
-| Mirroring over the phone's own hotspot | Built — check on the phone pending |
+| Phone screen off ignores touches | Done — a touch guard in Conduit for Android, on Android 13 and later |
+| Mirroring over the phone's own hotspot | Done |
 | Device → Mac clipboard and audio playback checked by a person | Pending |
 
 ## Known platform limits

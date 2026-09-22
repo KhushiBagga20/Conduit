@@ -130,8 +130,10 @@ enum PhoneRegistry {
             .map { MirroringController.Target(serial: $0.device.serial, transport: $0.transport) }
     }
 
-    /// What each feature can offer today. Features that need the Conduit
-    /// Android app, or are not built yet, say so instead of pretending.
+    /// What each feature can offer over adb today. Features that need the
+    /// Conduit Android app, or are not built yet, say so instead of
+    /// pretending. Link sharing travels over Conduit Link, so the interfaces
+    /// decide it from the linked phones instead.
     static func features(connected: Bool, osVersion: String?) -> [FeatureID: Availability] {
         let major = osVersion.flatMap { Int($0.split(separator: ".").first ?? "") }
         let overADB: Availability = connected ? .available : .requiresSetup
@@ -146,7 +148,6 @@ enum PhoneRegistry {
             .camera: major.map { $0 >= 12 } == false ? .unsupported : .planned,
             .trackpad: .planned,
             .calls: .planned,
-            .links: .planned,
             .files: .planned,
             .notifications: .planned,
             .findMac: .planned,

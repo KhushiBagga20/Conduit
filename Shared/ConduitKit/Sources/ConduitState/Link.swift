@@ -48,6 +48,18 @@ public nonisolated enum HotspotRequestStatus: Sendable, Equatable {
     case failed(String)
 }
 
+/// Sending the web link on this Mac's clipboard to a linked phone. Only the
+/// site's name is kept, never the link.
+public nonisolated enum LinkSendStatus: Sendable, Equatable {
+    case idle
+    case sending(site: String)
+    /// The phone took the link and shows a notification to open it.
+    case sent(site: String, phone: String)
+    case noLinkOnClipboard
+    case noPhoneConnected
+    case failed(String)
+}
+
 @Observable
 public final class LinkState {
 
@@ -69,6 +81,11 @@ public final class LinkState {
     public package(set) var phones: [LinkedPhone] = []
 
     public package(set) var hotspotRequest: HotspotRequestStatus = .idle
+
+    public package(set) var linkSend: LinkSendStatus = .idle
+
+    /// Whether a linked phone is connected right now.
+    public var hasConnectedPhone: Bool { phones.contains(where: \.isConnected) }
 
     package init() {}
 }

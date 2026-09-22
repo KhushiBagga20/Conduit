@@ -46,6 +46,10 @@ public final class ConduitEngine: ConduitCommands {
     private var lastAutomaticHotspotAsk = Date.distantPast
     /// Automatic asks in the current offline spell: the first, and one retry.
     private var automaticAsks = 0
+    /// Links sent to a phone, waiting for its answer, by request ID.
+    private var sentLinks: [String: (phone: String, site: String)] = [:]
+    /// Counts link sends, so an old outcome is not cleared by a newer one.
+    private var linkSendGeneration = 0
 
     private var attached: [String: AttachedTransport] = [:]
     private var known: [String: KnownPhone] = [:]
@@ -511,13 +515,94 @@ public final class ConduitEngine: ConduitCommands {
         switch envelope.kind {
         case .command(let requestID, let action) where action == .sessionPing:
             linkServer?.send(Envelope.success(to: requestID, payload: envelope.payload), to: peer.id)
+        case .command(let requestID, let action) where action == .linkSend:
+            openLink(envelope, requestID: requestID, from: peer)
+        case .response(let requestID, let outcome):
+            linkAnswered(requestID: requestID, outcome: outcome)
         case .command(let requestID, let action):
             linkServer?.send(Envelope.failure(to: requestID,
                                               ProtocolError(.unsupported, "This version of Conduit for Mac does not do that yet.")),
                              to: peer.id)
             CoreLog.engine.debug("Conduit Link: no handler for \(action.rawValue)")
-        case .response, .event:
+        case .event:
             break
+        }
+    }
+
+    // MARK: - Links
+
+    /// A linked phone shared a link: open it in the default browser, if it is
+    /// a web link and this Mac opens links from phones.
+    private func openLink(_ envelope: Envelope, requestID: String, from peer: LinkPeer) {
+        guard store.preferences.openLinksFromPhone else {
+            CoreLog.engine.notice("turned down a link from a phone: opening links is off")
+            linkServer?.send(Envelope.failure(to: requestID, ProtocolError(
+                .permissionDenied, "This Mac is set not to open links from phones.")), to: peer.id)
+            return
+        }
+        guard let text = envelope.payload?["url"]?.stringValue, let url = LinkSharing.acceptableURL(text) else {
+            CoreLog.engine.notice("turned down a link from a phone: not a web link")
+            linkServer?.send(Envelope.failure(to: requestID, ProtocolError(
+                .invalidRequest, "Only web links can be opened.")), to: peer.id)
+            return
+        }
+        NSWorkspace.shared.open(url)
+        CoreLog.engine.notice("opened a link from a linked phone")
+        linkServer?.send(Envelope.success(to: requestID), to: peer.id)
+        store.record(ActivityEvent(kind: .linkReceived, title: "Opened a link from \(peer.name)",
+                                   detail: LinkSharing.siteName(of: url)))
+    }
+
+    public func sendLinkToPhone() {
+        guard let text = NSPasteboard.general.string(forType: .string), let url = LinkSharing.acceptableURL(text) else {
+            finishLinkSend(.noLinkOnClipboard)
+            return
+        }
+        guard let peer = linkTrust?.peers.values.first(where: { linkedNow.contains($0.id) }) else {
+            finishLinkSend(.noPhoneConnected)
+            return
+        }
+
+        let site = LinkSharing.siteName(of: url)
+        let command = Envelope.command(.linkSend, payload: ["url": .string(url.absoluteString)])
+        guard case .command(let requestID, _) = command.kind else { return }
+        sentLinks[requestID] = (peer.name, site)
+        linkSendGeneration += 1
+        store.link.linkSend = .sending(site: site)
+        linkServer?.send(command, to: peer.id)
+        CoreLog.engine.notice("sent a link to a linked phone")
+
+        // The spec gives a command 15 seconds to be answered.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            guard let self, let sent = sentLinks.removeValue(forKey: requestID) else { return }
+            store.record(ActivityEvent(kind: .error, title: "\(sent.phone) didn't answer", detail: sent.site))
+            finishLinkSend(.failed("\(sent.phone) didn't answer."))
+        }
+    }
+
+    private func linkAnswered(requestID: String, outcome: Envelope.Outcome) {
+        guard let sent = sentLinks.removeValue(forKey: requestID) else { return }
+        switch outcome {
+        case .success:
+            CoreLog.engine.notice("the phone took the link")
+            store.record(ActivityEvent(kind: .linkReceived, title: "Sent a link to \(sent.phone)", detail: sent.site))
+            finishLinkSend(.sent(site: sent.site, phone: sent.phone))
+        case .failure(let error):
+            CoreLog.engine.notice("the phone turned down the link: \(error.code.rawValue)")
+            store.record(ActivityEvent(kind: .error, title: "\(sent.phone) didn't take the link", detail: error.message))
+            finishLinkSend(.failed(error.message))
+        }
+    }
+
+    /// Shows how a send ended, then goes back to idle unless another send
+    /// has started since.
+    private func finishLinkSend(_ status: LinkSendStatus) {
+        linkSendGeneration += 1
+        let generation = linkSendGeneration
+        store.link.linkSend = status
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            guard let self, linkSendGeneration == generation else { return }
+            store.link.linkSend = .idle
         }
     }
 

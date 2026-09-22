@@ -70,7 +70,7 @@ extension ConduitStore {
     private static func previewFeatures(connected: Bool) -> [FeatureID: Availability] {
         let overADB: Availability = connected ? .available : .requiresSetup
         return [.mirroring: overADB, .remoteInput: overADB, .clipboard: overADB, .audio: overADB,
-                .camera: .planned, .trackpad: .planned, .calls: .planned, .links: .planned,
+                .camera: .planned, .trackpad: .planned, .calls: .planned,
                 .files: .planned, .notifications: .planned, .findMac: .planned]
     }
 }

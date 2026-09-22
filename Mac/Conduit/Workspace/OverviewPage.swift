@@ -46,11 +46,11 @@ struct OverviewPage: View {
                 LabeledContent("Software", value: phone.androidVersionText)
             }
 
-            let current = FeatureID.allCases.filter { phone.availability($0) != .planned }
+            let current = FeatureID.allCases.filter { store.availability($0) != .planned }
             Section("Features") {
                 ForEach(current, id: \.self) { feature in
                     LabeledContent {
-                        AvailabilityLabel(availability: phone.availability(feature))
+                        AvailabilityLabel(availability: store.availability(feature))
                     } label: {
                         Label {
                             VStack(alignment: .leading, spacing: 1) {
@@ -67,7 +67,7 @@ struct OverviewPage: View {
                 }
             }
 
-            let planned = FeatureID.allCases.filter { phone.availability($0) == .planned }
+            let planned = FeatureID.allCases.filter { store.availability($0) == .planned }
             if !planned.isEmpty {
                 Section {
                     LabeledContent("Planned", value: planned.map(\.title).formatted(.list(type: .and)))
