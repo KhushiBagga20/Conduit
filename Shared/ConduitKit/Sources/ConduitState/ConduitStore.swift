@@ -59,6 +59,15 @@ public protocol ConduitCommands: AnyObject {
     /// Send the web link on this Mac's clipboard to the linked phone.
     func sendLinkToPhone()
 
+    /// Stop the sound a phone started when it went looking for this Mac.
+    func stopRinging()
+
+    /// Ask macOS for the Accessibility permission the phone's trackpad needs.
+    func requestTrackpadPermission()
+
+    /// Look again at whether macOS grants it.
+    func refreshTrackpadPermission()
+
     /// Conduit Link: pairing with a phone, and forgetting one.
     func openLinkPairing()
     func closeLinkPairing()
@@ -82,6 +91,14 @@ public nonisolated struct Preferences: Codable, Sendable, Equatable {
     public var askPhoneForHotspot = true
     /// Open links a linked phone shares, in the default browser.
     public var openLinksFromPhone = true
+    /// Let a linked phone drive this Mac's pointer from its trackpad screen.
+    public var phoneTrackpad = true
+    /// How far the pointer travels per point of finger movement, 0.5–3.
+    public var trackpadSensitivity = 1.6
+    /// Content follows the fingers, as macOS scrolls by default.
+    public var naturalScrolling = true
+    /// The phone buzzes when a click lands on the Mac.
+    public var trackpadHaptics = true
 
     public init() {}
 
@@ -96,6 +113,10 @@ public nonisolated struct Preferences: Codable, Sendable, Equatable {
         autoConnectWireless = try saved.decodeIfPresent(Bool.self, forKey: .autoConnectWireless) ?? true
         askPhoneForHotspot = try saved.decodeIfPresent(Bool.self, forKey: .askPhoneForHotspot) ?? true
         openLinksFromPhone = try saved.decodeIfPresent(Bool.self, forKey: .openLinksFromPhone) ?? true
+        phoneTrackpad = try saved.decodeIfPresent(Bool.self, forKey: .phoneTrackpad) ?? true
+        trackpadSensitivity = try saved.decodeIfPresent(Double.self, forKey: .trackpadSensitivity) ?? 1.6
+        naturalScrolling = try saved.decodeIfPresent(Bool.self, forKey: .naturalScrolling) ?? true
+        trackpadHaptics = try saved.decodeIfPresent(Bool.self, forKey: .trackpadHaptics) ?? true
     }
 }
 

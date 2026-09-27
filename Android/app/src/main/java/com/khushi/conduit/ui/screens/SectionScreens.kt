@@ -1,6 +1,7 @@
 package com.khushi.conduit.ui.screens
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -59,6 +60,7 @@ import com.khushi.conduit.core.protocol.Availability
 import com.khushi.conduit.core.protocol.FeatureId
 import com.khushi.conduit.link.HotspotBeacon
 import com.khushi.conduit.link.HotspotRequests
+import com.khushi.conduit.TrackpadActivity
 import com.khushi.conduit.link.LinkHub
 import com.khushi.conduit.link.LinkService
 import com.khushi.conduit.system.PhoneSetup
@@ -142,6 +144,7 @@ fun MacsScreen() {
             confirmPairing = LinkService::confirmPairing,
             rejectPairing = LinkService::rejectPairing,
             unlink = { LinkService.unlink(context, it) },
+            ring = { LinkService.ring(context) },
             setHotspotRequests = { on ->
                 if (on && !nearbyGranted()) {
                     nearby.launch(HotspotBeacon.NEEDED)
@@ -164,6 +167,7 @@ class MacsActions(
     val confirmPairing: () -> Unit = {},
     val rejectPairing: () -> Unit = {},
     val unlink: (String) -> Unit = {},
+    val ring: () -> Unit = {},
     val setHotspotRequests: (Boolean) -> Unit = {},
 )
 
@@ -232,6 +236,9 @@ private fun LinkedMacsSection(link: LinkHub.State, actions: MacsActions, hotspot
                             color = if (connected) LocalStatusColors.current.connected else canvas.contentSecondary,
                             style = MaterialTheme.typography.bodySmall,
                         )
+                    }
+                    if (connected) {
+                        TextButton(onClick = actions.ring) { Text("Ring", color = canvas.content) }
                     }
                     TextButton(onClick = { actions.unlink(mac.id) }) { Text("Unlink", color = canvas.contentSecondary) }
                 }
@@ -431,6 +438,7 @@ private enum class FeatureFilter(val label: String) { ALL("All"), AVAILABLE("Ava
 @Composable
 fun FeaturesScreen() {
     val canvas = LocalCanvas.current
+    val context = LocalContext.current
     var filter by rememberSaveable { mutableStateOf(FeatureFilter.ALL) }
 
     ScreenColumn("Features") {
@@ -446,9 +454,18 @@ fun FeaturesScreen() {
         PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
             shown.forEachIndexed { index, feature ->
                 if (index > 0) CardDivider()
+                // The trackpad is the one feature with a screen of its own.
+                val opens = feature == FeatureId.TRACKPAD
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .then(
+                            if (opens) {
+                                Modifier.clickable { context.startActivity(Intent(context, TrackpadActivity::class.java)) }
+                            } else {
+                                Modifier
+                            },
+                        )
                         .padding(vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -459,7 +476,11 @@ fun FeaturesScreen() {
                         Text(feature.detail(), color = canvas.contentSecondary, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.width(8.dp))
-                    AvailabilityPill(if (feature in featuresAvailableToday) Availability.AVAILABLE else Availability.PLANNED)
+                    if (opens) {
+                        Text("Open", color = canvas.content, style = MaterialTheme.typography.labelLarge)
+                    } else {
+                        AvailabilityPill(if (feature in featuresAvailableToday) Availability.AVAILABLE else Availability.PLANNED)
+                    }
                 }
             }
         }

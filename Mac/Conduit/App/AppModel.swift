@@ -12,6 +12,7 @@
 
 import ConduitCore
 import ConduitState
+import Observation
 
 @MainActor
 final class AppModel {
@@ -24,4 +25,24 @@ final class AppModel {
     var store: ConduitStore { engine.store }
 
     private init() {}
+
+    /// Put the ringing window on screen whenever a phone goes looking for
+    /// this Mac, and take it away when the ringing stops. The window belongs
+    /// to no scene: it has to appear over other apps, on any Space, whether
+    /// or not the workspace is open.
+    func watchRinging() {
+        // One shared model for the app's lifetime, so it holds itself here.
+        withObservationTracking { [self] in
+            _ = store.link.ringing
+        } onChange: { [self] in
+            Task { @MainActor in
+                if let ringing = store.link.ringing {
+                    RingingPanel.show(phoneName: ringing.phoneName) { [engine] in engine.stopRinging() }
+                } else {
+                    RingingPanel.hide()
+                }
+                watchRinging()
+            }
+        }
+    }
 }

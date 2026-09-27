@@ -9,7 +9,7 @@ a real phone, and a report of what changed and what is still limited.
 | **1 · Foundation** | Workspace, protocol specification, design tokens, ConduitKit, proven media stack, Mac app with menu bar and workspace, Android skeleton | Done — two hands-on checks pending |
 | **2 · Mac workspace** | Full workspace UI, phone screen with all existing mirroring features, fit/fill, fullscreen, always-on-top, screenshot | Planned |
 | **3 · Menu bar** | Connection ownership, quick actions, notifications, launch at login, auto-connect | Planned |
-| **4 · Android** | Pairing, foreground service, home, Macs, features, settings, share target, trackpad | In progress — all but the trackpad built and checked on the phone |
+| **4 · Android** | Pairing, foreground service, home, Macs, features, settings, share target, trackpad | In progress — all built; the trackpad screen is not working end to end yet |
 | **5 · Link sharing** | Android → Mac and Mac → Android, recents, notifications | Done — checked both ways on the phone |
 | **6 · Calls** | Incoming call events, accept/decline/end, outgoing requests, permissions | Planned |
 | **7 · Polish and release** | Latency, reconnection, accessibility, shortcuts, icons, onboarding, packaging | Planned |
@@ -28,10 +28,10 @@ and works over any network the two share — including the phone's hotspot.
 | **B · Conduit Link** | The channel: Mac listener and Bonjour advert, phone client and foreground service, identity keys, pairing, sealed frames, heartbeat | A | Done — paired and linked on the phone, over its hotspot |
 | **C · Device state** | Battery, charging and network shown on the Mac from the phone itself, not from adb polling | B | Planned |
 | **D · Links** | Share a link from the phone to the Mac and back, from the share sheet and the menu bar | B | Done — checked both ways on the phone |
-| **E · Find my Mac** | Ring this Mac from the phone | B | Planned |
+| **E · Find my Mac** | Ring this Mac from the phone | B | Built — check on the phone pending |
 | **F · Files** | Send a file each way, over the link's file channel | B | Planned |
 | **G · Notifications** | Phone notifications on the Mac, opt-in per app, with dismiss | B | Planned |
-| **H · Phone as trackpad** | The phone's screen drives the Mac's pointer; needs macOS Accessibility permission | B | Planned |
+| **H · Phone as trackpad** | The phone's screen drives the Mac's pointer; needs macOS Accessibility permission | B | Built, not working yet — the Mac had never been granted Accessibility, and no pointer has moved from the phone |
 | **I · Calls** | Incoming call events on the Mac, and answer/decline where Android allows it | B, G | Planned |
 | **J · Camera** | The phone's camera in a Conduit window through scrcpy. Using it in other Mac apps needs a Camera Extension and a paid Apple Developer account | — | Planned |
 
@@ -87,5 +87,10 @@ These shape the product and are shown in the UI rather than hidden.
   allows it and will be verified per device.
 - **Links sent to Android** open from a notification: Android 10+ does not
   let apps open screens from the background.
+- **Moving the Mac's pointer needs Accessibility permission**, which only the
+  person can grant, and which belongs to the exact copy of Conduit that asked
+  for it. Until it is granted the Mac drops every touch — so the phone asks
+  first (`trackpad.start`) and shows the Mac's answer rather than leaving
+  someone swiping at nothing.
 - **The system-wide camera** (a Camera Extension) needs Developer ID
   signing; it is planned, not built.

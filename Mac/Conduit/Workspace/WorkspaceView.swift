@@ -41,7 +41,8 @@ struct WorkspaceView: View {
         case .devices: DevicesPage()
         case .settings: SettingsForm().navigationTitle("Settings")
         case .links: LinksPage()
-        case .trackpad, .camera, .calls:
+        case .trackpad: TrackpadPage()
+        case .camera, .calls:
             PlannedFeaturePage(section: section)
         }
     }

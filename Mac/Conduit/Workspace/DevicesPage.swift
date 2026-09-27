@@ -85,6 +85,16 @@ struct DevicesPage: View {
             }
 
             LabeledContent {
+                if store.link.ringing != nil {
+                    Button("Stop") { store.commands?.stopRinging() }
+                }
+            } label: {
+                Text("Ring this Mac from the phone")
+                Text(store.link.ringing.map { "\($0.phoneName) is ringing this Mac now." }
+                    ?? "In Conduit for Android, tap Ring next to this Mac. It plays a sound here, at this Mac's own volume, until you stop it.")
+            }
+
+            LabeledContent {
                 if store.link.isPairingOpen {
                     Button("Stop") { store.commands?.closeLinkPairing() }
                 } else {

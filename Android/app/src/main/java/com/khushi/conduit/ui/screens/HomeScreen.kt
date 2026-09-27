@@ -1,6 +1,8 @@
 package com.khushi.conduit.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,6 +52,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.khushi.conduit.TrackpadActivity
+import com.khushi.conduit.link.LinkService
 import com.khushi.conduit.core.design.DesignTokens
 import com.khushi.conduit.core.protocol.Availability
 import com.khushi.conduit.core.protocol.FeatureId
@@ -127,6 +131,7 @@ fun HomeContent(
     onStayAwake: (Boolean) -> Unit,
     onOpen: (SystemScreen) -> Unit,
 ) {
+    val context = LocalContext.current
     Column(
         Modifier
             .fillMaxSize()
@@ -182,7 +187,16 @@ fun HomeContent(
                 val today = FeatureId.entries.filter { it in featuresAvailableToday }
                 today.forEachIndexed { index, feature ->
                     if (index > 0) CardDivider()
-                    FeatureRow(feature, Availability.AVAILABLE)
+                    when (feature) {
+                        // The two features this phone starts itself.
+                        FeatureId.TRACKPAD -> FeatureRow(feature, Availability.AVAILABLE, "Open") {
+                            context.startActivity(Intent(context, TrackpadActivity::class.java))
+                        }
+                        FeatureId.FIND_MAC -> FeatureRow(feature, Availability.AVAILABLE, "Ring") {
+                            LinkService.ring(context)
+                        }
+                        else -> FeatureRow(feature, Availability.AVAILABLE)
+                    }
                 }
                 Text(
                     "Started from your Mac, over USB or Wi-Fi.",
@@ -460,11 +474,17 @@ private fun SignalCard(wifi: WifiLink, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun FeatureRow(feature: FeatureId, availability: Availability) {
+private fun FeatureRow(
+    feature: FeatureId,
+    availability: Availability,
+    actionLabel: String? = null,
+    action: (() -> Unit)? = null,
+) {
     val canvas = LocalCanvas.current
     Row(
         Modifier
             .fillMaxWidth()
+            .then(if (action != null) Modifier.clickable(onClick = action) else Modifier)
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -475,7 +495,11 @@ private fun FeatureRow(feature: FeatureId, availability: Availability) {
             Text(feature.detail(), color = canvas.contentSecondary, style = MaterialTheme.typography.bodySmall)
         }
         Spacer(Modifier.width(8.dp))
-        AvailabilityPill(availability)
+        if (actionLabel != null) {
+            Text(actionLabel, color = canvas.content, style = MaterialTheme.typography.labelLarge)
+        } else {
+            AvailabilityPill(availability)
+        }
     }
 }
 

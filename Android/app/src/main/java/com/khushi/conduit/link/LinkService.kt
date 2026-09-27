@@ -12,6 +12,8 @@ import android.net.Uri
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.VibrationEffect
+import android.os.VibratorManager
 import android.util.Log
 import android.widget.Toast
 import com.khushi.conduit.MainActivity
@@ -26,11 +28,14 @@ import com.khushi.conduit.core.protocol.EnvelopeKind
 import com.khushi.conduit.core.protocol.ErrorCode
 import com.khushi.conduit.core.protocol.EventName
 import com.khushi.conduit.core.protocol.HandshakeIntent
+import com.khushi.conduit.core.protocol.InputEvent
 import com.khushi.conduit.core.protocol.LinkSessionInfo
 import com.khushi.conduit.core.protocol.Outcome
 import com.khushi.conduit.core.protocol.ProtocolError
+import com.khushi.conduit.core.protocol.Vibration
 import com.khushi.conduit.system.SystemScreen
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -72,8 +77,8 @@ class LinkService : Service() {
     private val main = Handler(Looper.getMainLooper())
     /** A shared link waiting for the Mac to be linked: in memory only, and only briefly. */
     private val queuedLink = AtomicReference<String?>(null)
-    /** Links sent to the Mac and not answered yet: request ID to the Mac's name. */
-    private val sentLinks = ConcurrentHashMap<String, String>()
+    /** Commands sent to the Mac and not answered yet, by request ID. */
+    private val awaiting = ConcurrentHashMap<String, (Outcome?) -> Unit>()
     private val linkNotifications = AtomicInteger(0)
 
     /** A new epoch each time this process starts, as the spec asks for events. */
@@ -238,6 +243,8 @@ class LinkService : Service() {
 
                 override fun onEnvelope(connection: LinkConnection, envelope: Envelope) = handle(connection, envelope)
 
+                override fun onVibrate(vibration: Vibration) = buzz(vibration)
+
                 override fun onClosed(error: ProtocolError?) {
                     stopHeartbeat()
                     LinkHub.update { state ->
@@ -272,8 +279,77 @@ class LinkService : Service() {
                     ProtocolError(ErrorCode.UNSUPPORTED, "This version of Conduit for Android does not do that yet."),
                 ))))
             }
-            is EnvelopeKind.Response -> sentLinks.remove(kind.requestId)?.let { mac -> linkAnswered(mac, kind.outcome) }
+            is EnvelopeKind.Response -> awaiting.remove(kind.requestId)?.invoke(kind.outcome)
             is EnvelopeKind.Event -> Unit
+        }
+    }
+
+    /**
+     * Send a command and hand its answer to [answered]; null means it went
+     * unanswered for the 15 seconds the spec allows.
+     */
+    private fun ask(connection: LinkConnection, action: String, payload: JsonObject?, answered: (Outcome?) -> Unit) {
+        val requestId = UUID.randomUUID().toString()
+        awaiting[requestId] = answered
+        connection.send(Envelope(EnvelopeKind.Command(requestId, action), payload))
+        main.postDelayed({ awaiting.remove(requestId)?.invoke(null) }, ANSWER_MILLIS)
+    }
+
+    // The trackpad
+
+    /**
+     * Tell the Mac the trackpad screen is open. [answered] gets null when the
+     * Mac will take it, or the reason it will not — the phone shows that
+     * instead of moving nothing.
+     */
+    private fun startTrackpad(answered: (ProtocolError?) -> Unit) {
+        val connection = connection
+        if (connection == null || connectedMacName() == null) {
+            main.post { answered(ProtocolError(ErrorCode.DEVICE_UNAVAILABLE, "Conduit isn't linked to your Mac right now.")) }
+            return
+        }
+        ask(connection, ActionName.TRACKPAD_START, null) { outcome ->
+            val error = when (outcome) {
+                null -> ProtocolError(ErrorCode.TIMEOUT, "Your Mac didn't answer.")
+                Outcome.Success -> null
+                is Outcome.Failure -> outcome.error
+            }
+            main.post { answered(error) }
+        }
+    }
+
+    private fun stopTrackpad() {
+        val connection = connection ?: return
+        ask(connection, ActionName.TRACKPAD_STOP, null) {}
+    }
+
+    /** A click landing on the Mac, felt here — Shared/Protocol §7, `haptic`. */
+    private fun buzz(vibration: Vibration) {
+        val vibrator = getSystemService(VibratorManager::class.java)?.defaultVibrator ?: return
+        if (!vibrator.hasVibrator()) return
+        runCatching {
+            vibrator.vibrate(VibrationEffect.createOneShot(
+                vibration.durationMs.toLong().coerceIn(1, 100), vibration.amplitude))
+        }
+    }
+
+    // Find my Mac
+
+    /** Ask the linked Mac to make a sound, for finding it. */
+    private fun ringMac() {
+        val connection = connection
+        val mac = connectedMacName()
+        if (connection == null || mac == null) {
+            toast("Not linked to your Mac right now.")
+            return
+        }
+        Log.i(TAG, "asked the Mac to ring")
+        ask(connection, ActionName.MAC_FIND, null) { outcome ->
+            when (outcome) {
+                null -> toast("$mac didn't answer.")
+                Outcome.Success -> toast("$mac is ringing. Stop it there when you find it.")
+                is Outcome.Failure -> toast("$mac can't ring. ${outcome.error.message}")
+            }
         }
     }
 
@@ -336,24 +412,19 @@ class LinkService : Service() {
     }
 
     private fun sendLink(connection: LinkConnection, url: String, macName: String) {
-        val requestId = UUID.randomUUID().toString()
-        sentLinks[requestId] = macName
-        connection.send(Envelope(EnvelopeKind.Command(requestId, ActionName.LINK_SEND), buildJsonObject { put("url", url) }))
         Log.i(TAG, "sent a link to the Mac")
-        // The spec gives a command 15 seconds to be answered.
-        main.postDelayed({
-            sentLinks.remove(requestId)?.let { toast("$it didn't answer, so the link may not have opened.") }
-        }, 15_000L)
-    }
-
-    private fun linkAnswered(macName: String, outcome: Outcome) = when (outcome) {
-        Outcome.Success -> {
-            Log.i(TAG, "the Mac opened the link")
-            toast("Opened on $macName")
-        }
-        is Outcome.Failure -> {
-            Log.i(TAG, "the Mac turned down the link: ${outcome.error.code}")
-            toast("$macName didn't open the link. ${outcome.error.message}")
+        ask(connection, ActionName.LINK_SEND, buildJsonObject { put("url", url) }) { outcome ->
+            when (outcome) {
+                null -> toast("$macName didn't answer, so the link may not have opened.")
+                Outcome.Success -> {
+                    Log.i(TAG, "the Mac opened the link")
+                    toast("Opened on $macName")
+                }
+                is Outcome.Failure -> {
+                    Log.i(TAG, "the Mac turned down the link: ${outcome.error.code}")
+                    toast("$macName didn't open the link. ${outcome.error.message}")
+                }
+            }
         }
     }
 
@@ -474,6 +545,8 @@ class LinkService : Service() {
         private const val LINKS_CHANNEL = "links"
         private const val LINK_NOTIFICATION_BASE = 100
         private const val LINK_WAIT_MILLIS = 20_000L
+        /** The spec gives a command 15 seconds to be answered. */
+        private const val ANSWER_MILLIS = 15_000L
         private const val ACTION_PAIR = "com.khushi.conduit.link.PAIR"
         private const val ACTION_STOP = "com.khushi.conduit.link.STOP"
         private const val ACTION_SEND_LINK = "com.khushi.conduit.link.SEND_LINK"
@@ -501,6 +574,32 @@ class LinkService : Service() {
             context.startForegroundService(Intent(context, LinkService::class.java).setAction(ACTION_PAIR)
                 .putExtra(EXTRA_ID, mac.id).putExtra(EXTRA_NAME, mac.name)
                 .putStringArrayListExtra(EXTRA_HOSTS, ArrayList(mac.hosts)).putExtra(EXTRA_PORT, mac.port))
+        }
+
+        /** The trackpad screen opened: [answered] gets null, or why the Mac will not take it. */
+        fun startTrackpad(answered: (ProtocolError?) -> Unit) {
+            instance?.startTrackpad(answered)
+                ?: answered(ProtocolError(ErrorCode.DEVICE_UNAVAILABLE, "Conduit isn't linked to your Mac right now."))
+        }
+
+        /** The trackpad screen closed. */
+        fun stopTrackpad() {
+            instance?.stopTrackpad()
+        }
+
+        /**
+         * Trackpad input for the linked Mac. Dropped when no Mac is linked:
+         * the trackpad screen shows that, and a queue of stale movement would
+         * arrive as a jump later.
+         */
+        fun input(event: InputEvent) {
+            instance?.connection?.send(event)
+        }
+
+        /** Ring the linked Mac, for finding it. */
+        fun ring(context: Context) {
+            instance?.ringMac()
+                ?: Toast.makeText(context, "Not linked to your Mac right now.", Toast.LENGTH_SHORT).show()
         }
 
         /** Send a web link to the linked Mac, which opens it, starting the link first if it is not running. */

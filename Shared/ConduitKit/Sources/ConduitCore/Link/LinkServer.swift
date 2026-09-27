@@ -42,6 +42,7 @@ final class LinkServer {
     var onPairing: (LinkConnection, LinkConnection.PairingRequest) -> Void = { _, _ in }
     var onReady: (LinkPeer) -> Void = { _ in }
     var onEnvelope: (Envelope, LinkPeer) -> Void = { _, _ in }
+    var onInput: (InputEvent, LinkPeer) -> Void = { _, _ in }
     var onClosed: (LinkPeer?, ProtocolError?) -> Void = { _, _ in }
 
     /// `port` 0 takes any free port.
@@ -170,6 +171,12 @@ final class LinkServer {
         }
     }
 
+    func send(_ frame: Frame, to peerID: String) {
+        for connection in connections.values where connection.peerID == peerID {
+            connection.send(frame)
+        }
+    }
+
     private func accept(_ nwConnection: NWConnection) {
         let connection = LinkConnection(connection: nwConnection, identity: identity, device: device(),
                                         trust: trust, pairingOpen: pairingOpen)
@@ -188,6 +195,7 @@ final class LinkServer {
             onReady(peer)
         }
         connection.onEnvelope = { [weak self] envelope, peer in self?.onEnvelope(envelope, peer) }
+        connection.onInput = { [weak self] event, peer in self?.onInput(event, peer) }
         connection.onClosed = { [weak self] peer, error in
             guard let self else { return }
             connections[key] = nil

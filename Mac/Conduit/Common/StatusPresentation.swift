@@ -11,11 +11,17 @@ import ConduitState
 import SwiftUI
 
 extension ConduitStore {
-    /// What a feature can offer now. Link sharing travels over Conduit Link,
-    /// so it depends on a linked phone being connected rather than on adb.
+    /// What a feature can offer now. Link sharing and find-my-Mac travel over
+    /// Conduit Link, so they depend on a linked phone being connected rather
+    /// than on adb.
     func availability(_ feature: FeatureID) -> Availability {
         switch feature {
-        case .links: link.hasConnectedPhone ? .available : .requiresSetup
+        case .links, .findMac: link.hasConnectedPhone ? .available : .requiresSetup
+        case .trackpad:
+            if link.phones.isEmpty { .requiresSetup }
+            else if !link.trackpadTrusted { .requiresPermission }
+            else if !preferences.phoneTrackpad { .disabled }
+            else { .available }
         default: activePhone?.availability(feature) ?? .planned
         }
     }
@@ -93,6 +99,7 @@ extension ActivityEvent {
         case .reconnecting: "arrow.triangle.2.circlepath"
         case .clipboardSynced: "doc.on.clipboard"
         case .linkReceived: "link"
+        case .ringing: "wave.3.right"
         case .callReceived: "phone"
         case .cameraStarted: "camera"
         case .transferCompleted: "doc"
@@ -104,7 +111,7 @@ extension ActivityEvent {
     var tone: StatusTone {
         switch kind {
         case .error: .error
-        case .permissionRequired, .reconnecting: .working
+        case .permissionRequired, .reconnecting, .ringing: .working
         case .phoneDisconnected, .mirroringStopped: .idle
         default: .connected
         }
@@ -127,13 +134,13 @@ extension FeatureID {
         case .remoteInput: "Control the phone with this Mac's mouse, trackpad and keyboard while mirroring."
         case .clipboard: "Copy on one device and paste on the other while mirroring."
         case .audio: "Hear the phone on this Mac while mirroring. Needs Android 11."
-        case .trackpad: "Turn the phone into a trackpad for this Mac. Arrives with Conduit for Android."
+        case .trackpad: "Turn the phone into a trackpad for this Mac. Needs macOS Accessibility permission."
         case .camera: "Use the phone's cameras inside Conduit. Needs Android 12."
         case .calls: "Answer, decline and place calls from this Mac. Call audio stays on the phone."
         case .links: "Send web links between this Mac and the phone over Conduit Link."
         case .files: "Send files between this Mac and the phone."
         case .notifications: "See the phone's notifications on this Mac."
-        case .findMac: "Ring this Mac from the phone. Arrives with Conduit for Android."
+        case .findMac: "Ring this Mac from the phone, over Conduit Link, when you cannot find it."
         }
     }
 }

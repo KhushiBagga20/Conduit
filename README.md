@@ -13,7 +13,10 @@ connection.
 > a Galaxy S24 Ultra, including carrying on over Wi-Fi when the cable is
 > pulled. Conduit for Android pairs with the Mac over Conduit Link, shares
 > links both ways, and lets the Mac ask for its hotspot over Bluetooth.
-> Files, notifications, calls and the trackpad are planned. See the
+> Ringing the Mac from the phone, and using the phone as a trackpad, are
+> built but not working end to end yet: the trackpad needs macOS
+> Accessibility permission and has not moved a pointer in anger. Files,
+> notifications and calls are planned. See the
 > [roadmap](Documentation/Roadmap.md) and
 > [measurements](Documentation/Measurements.md).
 
@@ -53,6 +56,21 @@ Read [Documentation/Architecture.md](Documentation/Architecture.md) first, then
 | Mac | macOS 15.0 or later, Xcode 26 |
 | Phone | Android 12 or later |
 | Tools | `adb` (`brew install android-platform-tools`), JDK 17 for Android builds |
+
+## Installing it
+
+A build lives in Xcode's build folder, which macOS clears — Conduit vanishes
+on the next restart. To keep it, copy the Release build into Applications
+once:
+
+```bash
+cp -R ~/Library/Developer/Xcode/DerivedData/Conduit-*/Build/Products/Release/Conduit.app /Applications/
+```
+
+Conduit then opens from Spotlight like any app and lives in the menu bar. It
+does not open at login yet. macOS privacy grants — Local Network, and
+Accessibility for the trackpad — belong to the copy that asked for them, so
+grant them again after moving it.
 
 ## Contributing
 

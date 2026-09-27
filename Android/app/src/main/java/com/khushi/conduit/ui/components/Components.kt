@@ -550,12 +550,15 @@ fun FeatureId.title(): String =
     DesignTokens.Feature.all.firstOrNull { it.id == wire }?.title ?: wire
 
 /** Features that work today, with Conduit for Mac. The rest are planned. */
-val featuresAvailableToday = setOf(FeatureId.MIRRORING, FeatureId.REMOTE_INPUT, FeatureId.CLIPBOARD, FeatureId.AUDIO, FeatureId.LINKS)
+val featuresAvailableToday = setOf(
+    FeatureId.MIRRORING, FeatureId.REMOTE_INPUT, FeatureId.CLIPBOARD, FeatureId.AUDIO,
+    FeatureId.LINKS, FeatureId.FIND_MAC, FeatureId.TRACKPAD,
+)
 
 fun FeatureId.detail(): String = when (this) {
     FeatureId.MIRRORING -> "See and use this phone on your Mac"
     FeatureId.REMOTE_INPUT -> "Your Mac's keyboard, mouse and trackpad"
-    FeatureId.TRACKPAD -> "Use this phone as your Mac's trackpad"
+    FeatureId.TRACKPAD -> "Use this phone as your Mac's trackpad and pointer"
     FeatureId.CLIPBOARD -> "Copy on one, paste on the other"
     FeatureId.CAMERA -> "This phone as your Mac's webcam"
     FeatureId.CALLS -> "Answer phone calls on your Mac"
@@ -563,5 +566,5 @@ fun FeatureId.detail(): String = when (this) {
     FeatureId.AUDIO -> "Phone sound plays on your Mac"
     FeatureId.FILES -> "Move files between phone and Mac"
     FeatureId.NOTIFICATIONS -> "Phone notifications on your Mac"
-    FeatureId.FIND_MAC -> "Ring your Mac from this phone"
+    FeatureId.FIND_MAC -> "Ring your Mac from this phone to find it"
 }

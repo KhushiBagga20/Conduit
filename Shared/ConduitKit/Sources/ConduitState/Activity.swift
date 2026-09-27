@@ -18,6 +18,7 @@ public nonisolated struct ActivityEvent: Identifiable, Sendable, Equatable {
         case reconnecting
         case clipboardSynced
         case linkReceived
+        case ringing
         case callReceived
         case cameraStarted
         case transferCompleted

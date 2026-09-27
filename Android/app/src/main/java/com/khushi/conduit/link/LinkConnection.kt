@@ -11,16 +11,19 @@ import com.khushi.conduit.core.protocol.Frame
 import com.khushi.conduit.core.protocol.FrameDecoder
 import com.khushi.conduit.core.protocol.HandshakeIntent
 import com.khushi.conduit.core.protocol.HandshakeMessage
+import com.khushi.conduit.core.protocol.InputEvent
 import com.khushi.conduit.core.protocol.LinkChannel
 import com.khushi.conduit.core.protocol.LinkCrypto
 import com.khushi.conduit.core.protocol.LinkSessionInfo
 import com.khushi.conduit.core.protocol.ProtocolError
+import com.khushi.conduit.core.protocol.Vibration
 import java.io.IOException
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * One connection from this phone to a Mac: the socket, the frames, the
@@ -47,6 +50,7 @@ class LinkConnection(
         fun onPairingCode(code: String, mac: DeviceInfo) {}
         fun onReady(connection: LinkConnection, mac: DeviceInfo, macKey: ByteArray, session: LinkSessionInfo) {}
         fun onEnvelope(connection: LinkConnection, envelope: Envelope) {}
+        fun onVibrate(vibration: Vibration) {}
         fun onClosed(error: ProtocolError?) {}
     }
 
@@ -57,6 +61,8 @@ class LinkConnection(
     private var output: OutputStream? = null
     private var sealer: LinkCrypto.Sealer? = null
     private var opener: LinkCrypto.Opener? = null
+    /** Input frames waiting to go out, for the backpressure rule in §7. */
+    private val queuedInput = AtomicInteger(0)
     @Volatile private var ready = false
     @Volatile private var closed = false
     private var closeError: ProtocolError? = null
@@ -99,7 +105,29 @@ class LinkConnection(
     fun rejectPairing() = onWorker { perform(handshake.rejectPairing()) }
 
     fun send(envelope: Envelope) = onWorker {
-        if (ready) send(envelope.encode().encodeToByteArray(), ControlType.ENVELOPE, sealed = true)
+        if (ready) send(envelope.encode().encodeToByteArray(), LinkChannel.CONTROL, ControlType.ENVELOPE, sealed = true)
+    }
+
+    /**
+     * Trackpad input (§7). Moves and scrolls are dropped while the writer is
+     * behind — losing a move costs a pixel, while losing a button-up leaves
+     * the Mac holding a stuck mouse button.
+     */
+    fun send(event: InputEvent) {
+        val droppable = event is InputEvent.Move || event is InputEvent.Scroll
+        if (droppable && queuedInput.get() >= MAX_QUEUED_INPUT) return
+        queuedInput.incrementAndGet()
+        try {
+            worker.execute {
+                queuedInput.decrementAndGet()
+                if (ready) {
+                    val frame = event.toFrame()
+                    send(frame.payload, frame.channel, frame.type, sealed = true)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            queuedInput.decrementAndGet()
+        }
     }
 
     private fun onWorker(task: () -> Unit) {
@@ -139,6 +167,9 @@ class LinkConnection(
                     ?: return close(ProtocolError(ErrorCode.INVALID_REQUEST, "The Mac sent an unreadable handshake."))
                 perform(handshake.receive(message, payload))
             }
+            frame.channel == LinkChannel.HAPTIC -> {
+                Vibration.from(Frame(frame.channel, frame.type, payload))?.let(listener::onVibrate)
+            }
             frame.channel == LinkChannel.CONTROL && frame.type == ControlType.ENVELOPE -> {
                 if (!ready) return close(ProtocolError(ErrorCode.NOT_PAIRED, "The Mac sent messages before the handshake finished."))
                 val envelope = runCatching { Envelope.decode(payload.decodeToString()) }.getOrNull()
@@ -153,7 +184,8 @@ class LinkConnection(
     private fun perform(actions: List<PhoneHandshake.Action>) {
         for (action in actions) {
             when (action) {
-                is PhoneHandshake.Action.Send -> send(action.payload, ControlType.HANDSHAKE, action.sealed)
+                is PhoneHandshake.Action.Send ->
+                    send(action.payload, LinkChannel.CONTROL, ControlType.HANDSHAKE, action.sealed)
                 is PhoneHandshake.Action.KeysEstablished -> {
                     // The phone seals with its own key and opens with the Mac's.
                     sealer = LinkCrypto.Sealer(action.keys.phoneToMac)
@@ -169,16 +201,16 @@ class LinkConnection(
         }
     }
 
-    private fun send(payload: ByteArray, type: Int, sealed: Boolean) {
+    private fun send(payload: ByteArray, channel: LinkChannel, type: Int, sealed: Boolean) {
         if (closed) return
         val body = if (sealed) {
-            sealer?.seal(payload, LinkChannel.CONTROL.value, type)
+            sealer?.seal(payload, channel.value, type)
                 ?: return close(ProtocolError(ErrorCode.INTERNAL, "Conduit tried to seal a message before the keys existed."))
         } else {
             payload
         }
         try {
-            synchronized(socket) { output?.run { write(Frame(LinkChannel.CONTROL, type, body).encode()); flush() } }
+            synchronized(socket) { output?.run { write(Frame(channel, type, body).encode()); flush() } }
         } catch (_: IOException) {
             close(ProtocolError(ErrorCode.DEVICE_UNAVAILABLE, "The Mac stopped answering."))
         }
@@ -193,5 +225,6 @@ class LinkConnection(
 
     private companion object {
         const val TAG = "ConduitLink"
+        const val MAX_QUEUED_INPUT = 16
     }
 }

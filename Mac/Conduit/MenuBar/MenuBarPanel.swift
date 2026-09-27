@@ -191,6 +191,9 @@ struct MenuBarPanel: View {
                         isEnabled: store.link.hasConnectedPhone && !store.link.linkSend.isSending) {
                     store.commands?.sendLinkToPhone()
                 }
+                if store.link.ringing != nil {
+                    MenuRow("Stop Ringing", systemImage: "wave.3.right") { store.commands?.stopRinging() }
+                }
                 MenuRow("Use Phone Hotspot", systemImage: "personalhotspot",
                         trailing: store.link.hotspotRequest.shortStatus,
                         isEnabled: store.link.hotspotRequest != .asking) {
@@ -208,10 +211,8 @@ struct MenuBarPanel: View {
 
     private var plannedActions: [(title: String, symbol: String, feature: FeatureID)] {
         [
-            ("Use Phone as Trackpad", "hand.point.up.left", .trackpad),
             ("Use Phone Camera", "camera", .camera),
             ("Call from Phone", "phone", .calls),
-            ("Find My Mac", "laptopcomputer", .findMac),
         ]
     }
 

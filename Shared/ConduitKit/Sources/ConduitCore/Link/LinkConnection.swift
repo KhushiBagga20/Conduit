@@ -28,6 +28,7 @@ final class LinkConnection {
     var onPairing: (PairingRequest) -> Void = { _ in }
     var onReady: (LinkPeer) -> Void = { _ in }
     var onEnvelope: (Envelope, LinkPeer) -> Void = { _, _ in }
+    var onInput: (InputEvent, LinkPeer) -> Void = { _, _ in }
     var onClosed: (LinkPeer?, ProtocolError?) -> Void = { _, _ in }
 
     /// The phone on the other end, once the handshake has proved it.
@@ -70,6 +71,13 @@ final class LinkConnection {
     /// The person compared the code and accepted, or refused.
     func confirmPairing() { perform(handshake.confirmPairing()) }
     func rejectPairing() { perform(handshake.rejectPairing()) }
+
+    /// A frame on a binary channel (§7), sealed like everything else after
+    /// the handshake.
+    func send(_ frame: Frame) {
+        guard peer != nil else { return }
+        send(frame.payload, channel: frame.channel, type: frame.type, sealed: true)
+    }
 
     func send(_ envelope: Envelope) {
         guard let payload = try? envelope.encoded() else { return }
@@ -137,9 +145,22 @@ final class LinkConnection {
             }
             onEnvelope(envelope, peer)
 
+        case (.input, _):
+            guard let peer else {
+                finish(ProtocolError(.notPaired, "The phone sent input before the handshake finished."))
+                return
+            }
+            guard let event = InputEvent(frame: Frame(channel: frame.channel, type: frame.type, payload: payload)) else {
+                // One unreadable pointer move is not worth dropping a working
+                // session for.
+                CoreLog.engine.debug("ignoring an input frame Conduit could not read")
+                return
+            }
+            onInput(event, peer)
+
         default:
-            // Channels for input, haptics and files arrive with their
-            // features; until then, silence is better than a guess.
+            // Channels for files and media arrive with their features; until
+            // then, silence is better than a guess.
             CoreLog.engine.debug("ignoring a Conduit Link frame on channel \(frame.channel.rawValue)")
         }
     }

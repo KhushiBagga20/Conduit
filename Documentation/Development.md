@@ -25,6 +25,11 @@ Command Line Tools. Prefix the command with
 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` instead of changing
 the system setting.
 
+**Installing it.** A build lives in Xcode's build folder, which macOS clears;
+Conduit vanishes on the next restart. Copy the Release build into
+`/Applications` to keep it, and grant its privacy prompts there — a grant
+belongs to the copy that asked for it.
+
 **Signing.** Development builds sign automatically with the team in
 `Mac/Config/Signing.xcconfig`. To use your own team, create
 `Mac/Config/Signing.local.xcconfig` (git-ignored) containing

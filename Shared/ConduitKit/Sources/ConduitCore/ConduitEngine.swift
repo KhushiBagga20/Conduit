@@ -50,6 +50,12 @@ public final class ConduitEngine: ConduitCommands {
     private var sentLinks: [String: (phone: String, site: String)] = [:]
     /// Counts link sends, so an old outcome is not cleared by a newer one.
     private var linkSendGeneration = 0
+    private let ringer = MacRinger()
+    private let trackpad = TrackpadInput()
+    /// When the phone last moved the pointer, to show that it is in control.
+    private var lastPhoneInput = Date.distantPast
+    private var trackpadIdleCheck: DispatchWorkItem?
+    private var lastTrustCheck = Date.distantPast
 
     private var attached: [String: AttachedTransport] = [:]
     private var known: [String: KnownPhone] = [:]
@@ -94,6 +100,7 @@ public final class ConduitEngine: ConduitCommands {
     public func start() {
         guard !started else { return }
         started = true
+        refreshTrackpadPermission()
 
         guard let adb else {
             store.tools.adb = .missing
@@ -366,6 +373,9 @@ public final class ConduitEngine: ConduitCommands {
         server.onEnvelope = { [weak self] envelope, peer in
             self?.linkReceived(envelope, from: peer)
         }
+        server.onInput = { [weak self] event, peer in
+            self?.phoneInput(event, from: peer)
+        }
         server.onClosed = { [weak self] peer, error in
             guard let self else { return }
             if let peer {
@@ -375,6 +385,9 @@ public final class ConduitEngine: ConduitCommands {
                 store.record(ActivityEvent(kind: .error, title: "Pairing didn't finish", detail: error.message))
             }
             if let peer { linkedNow.remove(peer.id) }
+            // A phone that vanishes mid-drag must not leave a button held.
+            trackpad.releaseEverything()
+            store.link.trackpadActive = false
             pairingConnection = nil
             store.link.pairingRequest = nil
             publishLinkedPhones()
@@ -517,6 +530,15 @@ public final class ConduitEngine: ConduitCommands {
             linkServer?.send(Envelope.success(to: requestID, payload: envelope.payload), to: peer.id)
         case .command(let requestID, let action) where action == .linkSend:
             openLink(envelope, requestID: requestID, from: peer)
+        case .command(let requestID, let action) where action == .trackpadStart:
+            linkServer?.send(trackpadAnswer(to: requestID), to: peer.id)
+        case .command(let requestID, let action) where action == .trackpadStop:
+            trackpad.releaseEverything()
+            store.link.trackpadActive = false
+            linkServer?.send(Envelope.success(to: requestID), to: peer.id)
+        case .command(let requestID, let action) where action == .macFind:
+            ring(for: peer)
+            linkServer?.send(Envelope.success(to: requestID), to: peer.id)
         case .response(let requestID, let outcome):
             linkAnswered(requestID: requestID, outcome: outcome)
         case .command(let requestID, let action):
@@ -527,6 +549,103 @@ public final class ConduitEngine: ConduitCommands {
         case .event:
             break
         }
+    }
+
+    // MARK: - The phone as a trackpad
+
+    /// Input from the phone's trackpad screen. It moves this Mac's pointer
+    /// only while the person allows it and macOS trusts Conduit.
+    private func phoneInput(_ event: InputEvent, from peer: LinkPeer) {
+        guard store.preferences.phoneTrackpad else { return }
+
+        // Asking macOS whether Conduit is trusted talks to the system, and
+        // pointer moves arrive in streams — so it is asked once a second.
+        let now = Date()
+        if now.timeIntervalSince(lastTrustCheck) > 1 {
+            lastTrustCheck = now
+            refreshTrackpadPermission()
+        }
+        guard store.link.trackpadTrusted else { return }
+
+        trackpad.sensitivity = store.preferences.trackpadSensitivity
+        trackpad.naturalScrolling = store.preferences.naturalScrolling
+        trackpad.handle(event)
+        showTrackpadInUse()
+
+        // A short buzz on the phone as a click lands, the way a Mac trackpad
+        // answers a press.
+        if case .button(_, true) = event, store.preferences.trackpadHaptics {
+            linkServer?.send(Vibration(durationMs: 12, amplitude: 140).frame, to: peer.id)
+        }
+    }
+
+    /// The phone opened its trackpad screen. It is told plainly whether this
+    /// Mac will take it: a phone swiping at a Mac that is dropping every
+    /// event has no other way to know.
+    private func trackpadAnswer(to requestID: String) -> Envelope {
+        guard store.preferences.phoneTrackpad else {
+            return Envelope.failure(to: requestID, ProtocolError(.permissionDenied,
+                "This Mac is set not to be controlled from the phone. Turn it on in Conduit → Trackpad."))
+        }
+        refreshTrackpadPermission()
+        guard store.link.trackpadTrusted else {
+            CoreLog.engine.notice("the phone's trackpad opened, but macOS has not allowed Conduit to move the pointer")
+            store.record(ActivityEvent(kind: .permissionRequired, title: "The phone's trackpad needs permission",
+                                       detail: "Allow Conduit under Privacy & Security → Accessibility"))
+            return Envelope.failure(to: requestID, ProtocolError(.permissionDenied,
+                "Conduit is not allowed to move this Mac's pointer. On the Mac, open Conduit → Trackpad and allow it under Accessibility."))
+        }
+        CoreLog.engine.notice("the phone's trackpad is open")
+        return Envelope.success(to: requestID)
+    }
+
+    /// Says the phone is in control, and stops saying so once it goes quiet.
+    /// Rescheduled at most twice a second: pointer moves arrive in streams.
+    private func showTrackpadInUse() {
+        let now = Date()
+        if !store.link.trackpadActive { store.link.trackpadActive = true }
+        guard now.timeIntervalSince(lastPhoneInput) > 0.5 else { return }
+        lastPhoneInput = now
+
+        trackpadIdleCheck?.cancel()
+        let check = DispatchWorkItem { [weak self] in
+            guard let self, Date().timeIntervalSince(lastPhoneInput) >= 1.5 else { return }
+            store.link.trackpadActive = false
+        }
+        trackpadIdleCheck = check
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: check)
+    }
+
+    public func requestTrackpadPermission() {
+        TrackpadInput.requestTrust()
+        refreshTrackpadPermission()
+    }
+
+    public func refreshTrackpadPermission() {
+        let trusted = TrackpadInput.isTrusted
+        if trusted != store.link.trackpadTrusted { store.link.trackpadTrusted = trusted }
+    }
+
+    // MARK: - Find my Mac
+
+    /// The phone is looking for this Mac: ring until someone here stops it,
+    /// or until the ringer's own deadline.
+    private func ring(for peer: LinkPeer) {
+        CoreLog.engine.notice("a linked phone is looking for this Mac")
+        store.link.ringing = RingingMac(phoneName: peer.name, since: Date())
+        store.record(ActivityEvent(kind: .ringing, title: "\(peer.name) is looking for this Mac",
+                                   detail: "Ringing until you stop it"))
+        ringer.start { [weak self] in
+            guard let self else { return }
+            store.link.ringing = nil
+        }
+    }
+
+    public func stopRinging() {
+        guard ringer.isRinging || store.link.ringing != nil else { return }
+        ringer.stop()
+        store.link.ringing = nil
+        CoreLog.engine.notice("stopped ringing")
     }
 
     // MARK: - Links
@@ -686,6 +805,11 @@ public final class ConduitEngine: ConduitCommands {
         store.preferences = preferences
         if let data = try? JSONEncoder().encode(preferences) {
             defaults.set(data, forKey: Key.preferences)
+        }
+
+        if !preferences.phoneTrackpad {
+            trackpad.releaseEverything()
+            store.link.trackpadActive = false
         }
 
         if wirelessChanged, started, adb != nil {

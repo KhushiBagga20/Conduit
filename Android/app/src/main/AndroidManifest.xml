@@ -31,6 +31,9 @@
   linked Mac, which opens it; links from the Mac arrive as a notification
   that opens them here. Neither keeps the link, and only its site is shown.
 
+  VIBRATE is what the trackpad screen feels like: the Mac sends a short buzz
+  as each click lands. It is granted at install and reaches nothing else.
+
   BLUETOOTH_ADVERTISE and BLUETOOTH_CONNECT ("Nearby devices") let a paired
   Mac ask for this phone's hotspot when the Mac is offline. The advert
   carries only Conduit's service UUID, and only a request signed by a paired
@@ -50,6 +53,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- The hotspot switch, opened straight from the request notification. -->
     <queries>
@@ -79,6 +83,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".TrackpadActivity"
+            android:exported="false"
+            android:label="@string/trackpad"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".link.ShareToMacActivity"

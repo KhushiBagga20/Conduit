@@ -48,6 +48,18 @@ public nonisolated enum HotspotRequestStatus: Sendable, Equatable {
     case failed(String)
 }
 
+/// A phone is looking for this Mac, and it is ringing until someone here
+/// stops it.
+public nonisolated struct RingingMac: Sendable, Equatable {
+    public let phoneName: String
+    public let since: Date
+
+    public init(phoneName: String, since: Date) {
+        self.phoneName = phoneName
+        self.since = since
+    }
+}
+
 /// Sending the web link on this Mac's clipboard to a linked phone. Only the
 /// site's name is kept, never the link.
 public nonisolated enum LinkSendStatus: Sendable, Equatable {
@@ -83,6 +95,15 @@ public final class LinkState {
     public package(set) var hotspotRequest: HotspotRequestStatus = .idle
 
     public package(set) var linkSend: LinkSendStatus = .idle
+
+    public package(set) var ringing: RingingMac?
+
+    /// Whether macOS lets Conduit move the pointer: the phone's trackpad
+    /// does nothing until it does.
+    public package(set) var trackpadTrusted = false
+
+    /// True while the phone is actually driving the pointer.
+    public package(set) var trackpadActive = false
 
     /// Whether a linked phone is connected right now.
     public var hasConnectedPhone: Bool { phones.contains(where: \.isConnected) }
