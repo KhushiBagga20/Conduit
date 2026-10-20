@@ -23,6 +23,12 @@ struct MenuBarPanel: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        GlassGroup {
+            panel
+        }
+    }
+
+    private var panel: some View {
         VStack(alignment: .leading, spacing: 8) {
             deviceHeader
             controls
@@ -167,7 +173,6 @@ struct MenuBarPanel: View {
 
     private var actions: some View {
         let status = store.mirroring.status
-        let controlReady = store.mirroring.session?.control.state == .connected
 
         return VStack(alignment: .leading, spacing: 0) {
             MenuDivider()
@@ -182,7 +187,7 @@ struct MenuBarPanel: View {
                 }
             }
             MenuRow("Send Clipboard", systemImage: "doc.on.clipboard",
-                    trailing: controlReady ? nil : "While mirroring", isEnabled: controlReady) {
+                    trailing: store.clipboard.canReachPhone ? nil : "No phone", isEnabled: store.clipboard.canReachPhone) {
                 store.commands?.sendMacClipboardToPhone()
             }
             if !store.link.phones.isEmpty {
@@ -270,17 +275,38 @@ struct PanelModule<Content: View>: View {
         content
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(ModuleBackground())
+            .moduleSurface()
     }
 }
 
-private struct ModuleBackground: View {
+extension View {
+    /// Control Center's module surface: Liquid Glass on macOS 26 and later,
+    /// a faint tile before. Glass wraps the content it carries — set behind
+    /// it as a background, it is drawn over it instead.
+    @ViewBuilder
+    func moduleSurface() -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        if #available(macOS 26, *) {
+            glassEffect(.regular, in: shape)
+        } else {
+            background(shape
+                .fill(Color.primary.opacity(0.05))
+                .overlay(shape.strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5)))
+        }
+    }
+}
+
+/// Lets neighbouring glass shapes blend and render together, where macOS
+/// has Liquid Glass.
+struct GlassGroup<Content: View>: View {
+    @ViewBuilder let content: Content
+
     var body: some View {
-        RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .fill(Color.primary.opacity(0.05))
-            .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+        if #available(macOS 26, *) {
+            GlassEffectContainer { content }
+        } else {
+            content
+        }
     }
 }
 
@@ -315,7 +341,7 @@ struct ControlToggle: View {
             }
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(ModuleBackground())
+            .moduleSurface()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

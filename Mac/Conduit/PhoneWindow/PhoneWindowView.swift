@@ -120,6 +120,9 @@ struct PhoneWindowView: View {
                     window?.level = keepOnTop ? .floating : .normal
                 }
             }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .modifier(ControlCapsule())
             .disabled(!controlReady && status == .running)
             .opacity(showControls ? 1 : 0)
             .allowsHitTesting(showControls)
@@ -224,6 +227,18 @@ struct PhoneWindowView: View {
             frame.origin = NSPoint(x: window.frame.midX - frame.width / 2, y: window.frame.maxY - frame.height)
         }
         window.setFrame(frame, display: true, animate: !firstFit)
+    }
+}
+
+/// The controls float in a capsule of Liquid Glass over the black bezel, as
+/// iPhone Mirroring's do; before macOS 26, a dark translucent capsule.
+private struct ControlCapsule: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content.glassEffect(.regular, in: Capsule())
+        } else {
+            content.background(Capsule().fill(Color.white.opacity(0.08)))
+        }
     }
 }
 

@@ -10,20 +10,22 @@ import ConduitDesign
 import ConduitState
 import SwiftUI
 
-/// A device icon: an SF Symbol on the brand gradient, with a status badge.
+/// A device icon in the Mac's own manner: a black tile with a glassy sheen
+/// across the top, the phone's glyph, and a status badge.
 struct DeviceIcon: View {
     var tone: StatusTone?
     var size: CGFloat = 40
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-            .fill(LinearGradient(
-                colors: [DesignTokens.Color.accent.color, DesignTokens.Color.flow.color],
-                startPoint: .topLeading, endPoint: .bottomTrailing))
+        let tile = RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+        tile
+            .fill(LinearGradient(colors: [Color(white: 0.2), Color(white: 0.03)], startPoint: .top, endPoint: .bottom))
+            .overlay(tile.fill(LinearGradient(colors: [.white.opacity(0.2), .clear], startPoint: .top, endPoint: .center)))
+            .overlay(tile.strokeBorder(.white.opacity(0.14), lineWidth: 0.5))
             .frame(width: size, height: size)
             .overlay {
                 Image(systemName: "smartphone")
-                    .font(.system(size: size * 0.5, weight: .medium))
+                    .font(.system(size: size * 0.48, weight: .medium))
                     .foregroundStyle(.white)
             }
             .overlay(alignment: .bottomTrailing) {
@@ -35,7 +37,7 @@ struct DeviceIcon: View {
                         .offset(x: size * 0.08, y: size * 0.08)
                 }
             }
-            .shadow(color: .black.opacity(0.12), radius: 1, y: 0.5)
+            .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
             .accessibilityHidden(true)
     }
 }
