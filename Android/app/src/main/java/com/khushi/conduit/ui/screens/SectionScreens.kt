@@ -7,7 +7,6 @@ import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,18 +22,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.LaptopMac
-import androidx.compose.material.icons.rounded.Notifications
-import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Coffee
 import androidx.compose.material.icons.rounded.DeveloperMode
-import androidx.compose.material.icons.rounded.PrivacyTip
+import androidx.compose.material.icons.rounded.LaptopMac
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.WifiTethering
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -56,37 +52,40 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.khushi.conduit.TrackpadActivity
 import com.khushi.conduit.core.design.DesignTokens
 import com.khushi.conduit.core.protocol.Availability
 import com.khushi.conduit.core.protocol.FeatureId
 import com.khushi.conduit.link.HotspotBeacon
 import com.khushi.conduit.link.HotspotRequests
-import com.khushi.conduit.TrackpadActivity
 import com.khushi.conduit.link.LinkHub
+import com.khushi.conduit.link.LinkService
 import com.khushi.conduit.notifications.NotificationApps
 import com.khushi.conduit.notifications.NotificationRelay
-import com.khushi.conduit.link.LinkService
 import com.khushi.conduit.system.PhoneSetup
 import com.khushi.conduit.system.SystemScreen
 import com.khushi.conduit.system.rememberHotspotAddress
 import com.khushi.conduit.system.rememberPhoneSettings
 import com.khushi.conduit.ui.LocalAppPreferences
 import com.khushi.conduit.ui.ThemeMode
-import com.khushi.conduit.ui.components.AvailabilityPill
-import com.khushi.conduit.ui.components.BottomBarSpacer
-import com.khushi.conduit.ui.components.CardDivider
+import com.khushi.conduit.ui.components.AvailabilityTag
+import com.khushi.conduit.ui.components.BottomSpacer
+import com.khushi.conduit.ui.components.Chevron
 import com.khushi.conduit.ui.components.ConduitMark
-import com.khushi.conduit.ui.components.DottedEmptyState
-import com.khushi.conduit.ui.components.IconBubble
+import com.khushi.conduit.ui.components.EmptyState
+import com.khushi.conduit.ui.components.FlatBox
+import com.khushi.conduit.ui.components.FlatButton
+import com.khushi.conduit.ui.components.Footnote
+import com.khushi.conduit.ui.components.ItemRow
+import com.khushi.conduit.ui.components.Line
 import com.khushi.conduit.ui.components.NeedsPermissionDialog
-import com.khushi.conduit.ui.components.PillButton
-import com.khushi.conduit.ui.components.PillSegments
-import com.khushi.conduit.ui.components.PlainCard
+import com.khushi.conduit.ui.components.RowAction
 import com.khushi.conduit.ui.components.ScreenTitle
 import com.khushi.conduit.ui.components.SectionLabel
+import com.khushi.conduit.ui.components.Segmented
 import com.khushi.conduit.ui.components.SwitchRow
+import com.khushi.conduit.ui.components.TrailingText
 import com.khushi.conduit.ui.components.detail
 import com.khushi.conduit.ui.components.featuresAvailableToday
 import com.khushi.conduit.ui.components.icon
@@ -101,12 +100,12 @@ private fun ScreenColumn(title: String, content: @Composable ColumnScope.() -> U
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .statusBarsPadding()
-            .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         ScreenTitle(title, Modifier.padding(top = 20.dp, start = 4.dp, bottom = 4.dp))
         content()
-        BottomBarSpacer()
+        BottomSpacer()
     }
 }
 
@@ -188,22 +187,21 @@ fun MacsContent(
     ScreenColumn("Macs") {
         LinkedMacsSection(link, actions, hotspotRequests)
 
-        SectionLabel("Mirroring from Conduit for Mac")
-        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+        SectionLabel("Mirroring")
+        FlatBox {
             SetupStep(1, "Developer options", "Settings → About phone → Software information → tap Build number 7 times.", phone.developerOptions)
-            CardDivider()
+            Line()
             SetupStep(2, "USB debugging", "For a cable connection, and to let your Mac in the first time.", phone.usbDebugging)
-            CardDivider()
+            Line()
             SetupStep(3, "Wireless debugging", "For Wi-Fi. Conduit for Mac finds this phone by itself.", phone.wirelessDebugging)
+            Line()
+            ItemRow("Open Developer options", icon = Icons.Rounded.DeveloperMode, onClick = { onOpen(SystemScreen.DEVELOPER_OPTIONS) }) {
+                Chevron()
+            }
         }
-        PillButton(
-            "Open Developer options",
-            icon = Icons.Rounded.DeveloperMode,
-            modifier = Modifier.fillMaxWidth(),
-        ) { onOpen(SystemScreen.DEVELOPER_OPTIONS) }
 
         SectionLabel("Away from Wi-Fi")
-        HotspotCard(hotspotAddress, onOpen)
+        HotspotBox(hotspotAddress, onOpen)
     }
 }
 
@@ -216,40 +214,32 @@ private fun LinkedMacsSection(link: LinkHub.State, actions: MacsActions, hotspot
     val canvas = LocalCanvas.current
 
     if (link.linked.isEmpty() && !link.adding) {
-        DottedEmptyState(
-            title = "No Macs linked yet",
+        EmptyState(
+            title = "No Mac linked yet",
             message = "Link a Mac to share links, files and notifications with it. It works on any network " +
                 "you share — including this phone's hotspot — and needs no developer options.",
         ) {
-            PillButton("Add Mac", icon = Icons.Rounded.Add, onClick = actions.addMac)
+            FlatButton("Add Mac", icon = Icons.Rounded.Add, onClick = actions.addMac)
         }
     }
 
     if (link.linked.isNotEmpty()) {
-        SectionLabel("Linked Macs")
-        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+        SectionLabel("Linked")
+        FlatBox {
             link.linked.forEachIndexed { index, mac ->
-                if (index > 0) CardDivider()
+                if (index > 0) Line()
                 val connected = link.connectedId == mac.id
-                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconBubble(Icons.Rounded.LaptopMac)
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(mac.name, color = canvas.content, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            if (connected) "Linked now" else "Last seen ${DateUtils.getRelativeTimeSpanString(mac.lastSeen)}",
-                            color = if (connected) LocalStatusColors.current.connected else canvas.contentSecondary,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    if (connected) {
-                        TextButton(onClick = actions.ring) { Text("Ring", color = canvas.content) }
-                    }
-                    TextButton(onClick = { actions.unlink(mac.id) }) { Text("Unlink", color = canvas.contentSecondary) }
+                ItemRow(
+                    mac.name,
+                    supporting = if (connected) "Linked now" else "Last seen ${DateUtils.getRelativeTimeSpanString(mac.lastSeen)}",
+                    supportingColor = if (connected) LocalStatusColors.current.connected else null,
+                    icon = Icons.Rounded.LaptopMac,
+                ) {
+                    if (connected) RowAction("Ring", onClick = actions.ring)
+                    RowAction("Unlink", secondary = true) { actions.unlink(mac.id) }
                 }
             }
-        }
-        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+            Line()
             SwitchRow(
                 icon = Icons.Rounded.WifiTethering,
                 title = "Let your Mac ask for the hotspot",
@@ -262,66 +252,52 @@ private fun LinkedMacsSection(link: LinkHub.State, actions: MacsActions, hotspot
                 onCheckedChange = actions.setHotspotRequests,
             )
         }
-        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
-            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconBubble(Icons.Rounded.Link)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Links and clipboard", color = canvas.content, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "In any app, Share → Send to Mac opens a link on your Mac, or puts other text on its " +
-                            "clipboard. What you copy on your Mac lands here by itself. To send this phone's " +
-                            "clipboard, add the Send clipboard to Mac tile to Quick Settings.",
-                        color = canvas.contentSecondary,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-        }
+        Footnote(
+            "Share → Send to Mac opens a link on your Mac, or puts other text on its clipboard. What you copy " +
+                "on your Mac lands here by itself; to send this phone's clipboard, use the Send clipboard to Mac " +
+                "tile in Quick Settings.",
+        )
         if (!link.adding) {
-            PillButton("Add another Mac", icon = Icons.Rounded.Add, modifier = Modifier.fillMaxWidth(), onClick = actions.addMac)
+            FlatButton("Add another Mac", icon = Icons.Rounded.Add, primary = false, modifier = Modifier.fillMaxWidth(), onClick = actions.addMac)
         }
     }
 
     if (link.adding) {
         SectionLabel("Add a Mac")
-        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+        FlatBox {
             Text(
                 "On the Mac, open Conduit → Devices → Add Phone. Macs appear here when they are on a network this " +
                     "phone can reach, or when your Mac is connected to this phone over adb.",
                 color = canvas.contentSecondary,
                 style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(16.dp),
             )
-            Spacer(Modifier.height(8.dp))
             if (link.found.isEmpty()) {
-                Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(18.dp), color = canvas.content, strokeWidth = 2.dp)
+                Line()
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), color = canvas.content, strokeWidth = 2.dp)
                     Spacer(Modifier.width(12.dp))
                     Text("Looking for Macs…", color = canvas.content, style = MaterialTheme.typography.bodyMedium)
                 }
             }
-            link.found.forEachIndexed { index, found ->
-                if (index > 0) CardDivider()
-                Row(
-                    Modifier.fillMaxWidth().clickable { actions.pair(found) }.padding(vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconBubble(Icons.Rounded.LaptopMac)
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(found.name, color = canvas.content, style = MaterialTheme.typography.titleMedium)
-                        Text(found.hosts.first(), color = canvas.contentSecondary, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Text("Pair", color = canvas.content, style = MaterialTheme.typography.labelLarge)
-                }
+            link.found.forEach { found ->
+                Line()
+                ItemRow(
+                    found.name,
+                    supporting = found.hosts.first(),
+                    icon = Icons.Rounded.LaptopMac,
+                    onClick = { actions.pair(found) },
+                ) { TrailingText("Pair", color = canvas.content) }
             }
             (link.status as? LinkHub.Status.Failed)?.let {
+                Line()
                 Text(it.message, color = LocalStatusColors.current.error, style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 8.dp))
+                    modifier = Modifier.padding(16.dp))
             }
             (link.status as? LinkHub.Status.Connecting)?.let {
+                Line()
                 Text("Contacting ${it.macName}…", color = canvas.contentSecondary, style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(top = 8.dp))
+                    modifier = Modifier.padding(16.dp))
             }
         }
         TextButton(onClick = actions.stopAdding, modifier = Modifier.fillMaxWidth()) {
@@ -357,37 +333,33 @@ private fun LinkedMacsSection(link: LinkHub.State, actions: MacsActions, hotspot
  * phone is still connected.
  */
 @Composable
-private fun HotspotCard(hotspotAddress: String?, onOpen: (SystemScreen) -> Unit) {
+private fun HotspotBox(hotspotAddress: String?, onOpen: (SystemScreen) -> Unit) {
     val canvas = LocalCanvas.current
-    PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconBubble(Icons.Rounded.WifiTethering)
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Use this phone's hotspot", color = canvas.content, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    if (hotspotAddress != null) "Hotspot on at $hotspotAddress" else "Hotspot off",
-                    color = if (hotspotAddress != null) LocalStatusColors.current.connected else canvas.contentSecondary,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+    FlatBox {
+        ItemRow(
+            "Use this phone's hotspot",
+            supporting = if (hotspotAddress != null) "Hotspot on at $hotspotAddress" else "Hotspot off",
+            supportingColor = if (hotspotAddress != null) LocalStatusColors.current.connected else null,
+            icon = Icons.Rounded.WifiTethering,
+        )
+        Line()
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            HotspotStep(1, "On the Mac, while this phone is connected, open Conduit → Devices → Get Ready.")
+            HotspotStep(2, "Turn this phone's hotspot on.")
+            HotspotStep(3, "Join the Mac to the hotspot. Conduit finds the phone by itself.")
         }
-        Spacer(Modifier.height(12.dp))
-        HotspotStep(1, "On the Mac, while this phone is connected, open Conduit → Devices → Get Ready.")
-        HotspotStep(2, "Turn this phone's hotspot on.")
-        HotspotStep(3, "Join the Mac to the hotspot. Conduit finds the phone by itself.")
-        Spacer(Modifier.height(12.dp))
-        PillButton("Open hotspot settings", modifier = Modifier.fillMaxWidth()) { onOpen(SystemScreen.HOTSPOT) }
+        Line()
+        ItemRow("Open hotspot settings", onClick = { onOpen(SystemScreen.HOTSPOT) }) { Chevron() }
     }
 }
 
 @Composable
 private fun HotspotStep(number: Int, text: String) {
     val canvas = LocalCanvas.current
-    Row(Modifier.padding(vertical = 4.dp)) {
+    Row(Modifier.padding(vertical = 3.dp)) {
         Text(
             "$number",
-            color = canvas.contentSecondary,
+            color = canvas.contentTertiary,
             style = MaterialTheme.typography.labelLarge,
             modifier = Modifier.width(20.dp),
         )
@@ -398,40 +370,35 @@ private fun HotspotStep(number: Int, text: String) {
 @Composable
 private fun SetupStep(number: Int, title: String, detail: String, done: Boolean) {
     val canvas = LocalCanvas.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp)
-            .semantics(mergeDescendants = true) {},
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier
-                .size(36.dp)
-                .then(
-                    if (done) {
-                        Modifier.background(canvas.lime, CircleShape)
-                    } else {
-                        Modifier.border(1.5.dp, canvas.content.copy(alpha = 0.25f), CircleShape)
-                    },
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (done) {
-                Icon(Icons.Rounded.Check, contentDescription = null, tint = canvas.background, modifier = Modifier.size(20.dp))
-            } else {
-                Text("$number", color = canvas.contentSecondary, style = MaterialTheme.typography.labelLarge)
+    val stepShape = RoundedCornerShape(6.dp)
+    ItemRow(
+        title,
+        supporting = detail,
+        modifier = Modifier.semantics(mergeDescendants = true) {},
+        leading = {
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .then(
+                        if (done) {
+                            Modifier.background(canvas.accent, stepShape)
+                        } else {
+                            Modifier.border(1.dp, canvas.line, stepShape)
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (done) {
+                    Icon(Icons.Rounded.Check, contentDescription = null, tint = canvas.onAccent, modifier = Modifier.size(16.dp))
+                } else {
+                    Text("$number", color = canvas.contentSecondary, style = MaterialTheme.typography.labelMedium)
+                }
             }
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = canvas.content, style = MaterialTheme.typography.titleMedium)
-            Text(detail, color = canvas.contentSecondary, style = MaterialTheme.typography.bodySmall)
-        }
-        Spacer(Modifier.width(10.dp))
+        },
+    ) {
         Text(
             if (done) "On" else "Off",
-            color = if (done) canvas.content else canvas.contentSecondary,
+            color = if (done) canvas.content else canvas.contentTertiary,
             style = MaterialTheme.typography.labelLarge,
             modifier = Modifier.semantics { contentDescription = if (done) "On" else "Off" },
         )
@@ -443,12 +410,12 @@ private enum class FeatureFilter(val label: String) { ALL("All"), AVAILABLE("Ava
 /** Every Conduit feature and whether it works today, filterable. */
 @Composable
 fun FeaturesScreen() {
-    val canvas = LocalCanvas.current
     val context = LocalContext.current
     var filter by rememberSaveable { mutableStateOf(FeatureFilter.ALL) }
 
     ScreenColumn("Features") {
-        PillSegments(FeatureFilter.entries, filter, label = { it.label }) { filter = it }
+        Segmented(FeatureFilter.entries, filter, label = { it.label }) { filter = it }
+        Spacer(Modifier.height(4.dp))
 
         val shown = FeatureId.entries.filter { feature ->
             when (filter) {
@@ -457,56 +424,30 @@ fun FeaturesScreen() {
                 FeatureFilter.PLANNED -> feature !in featuresAvailableToday
             }
         }
-        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+        FlatBox {
             shown.forEachIndexed { index, feature ->
-                if (index > 0) CardDivider()
+                if (index > 0) Line()
                 // The trackpad is the one feature with a screen of its own.
                 val opens = feature == FeatureId.TRACKPAD
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .then(
-                            if (opens) {
-                                Modifier.clickable { context.startActivity(Intent(context, TrackpadActivity::class.java)) }
-                            } else {
-                                Modifier
-                            },
-                        )
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconBubble(feature.icon())
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(feature.title(), color = canvas.content, style = MaterialTheme.typography.titleMedium)
-                        Text(feature.detail(), color = canvas.contentSecondary, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    if (opens) {
-                        Text("Open", color = canvas.content, style = MaterialTheme.typography.labelLarge)
+                ItemRow(
+                    feature.title(),
+                    supporting = feature.detail(),
+                    icon = feature.icon(),
+                    onClick = if (opens) {
+                        { context.startActivity(Intent(context, TrackpadActivity::class.java)) }
                     } else {
-                        AvailabilityPill(if (feature in featuresAvailableToday) Availability.AVAILABLE else Availability.PLANNED)
+                        null
+                    },
+                ) {
+                    if (opens) {
+                        Chevron()
+                    } else {
+                        AvailabilityTag(if (feature in featuresAvailableToday) Availability.AVAILABLE else Availability.PLANNED)
                     }
                 }
             }
         }
-        Text(
-            "Available features are started from Conduit for Mac while this phone is connected.",
-            color = canvas.contentSecondary,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-    }
-}
-
-@Composable
-fun ActivityScreen() {
-    ScreenColumn("Activity") {
-        Spacer(Modifier.height(24.dp))
-        DottedEmptyState(
-            title = "No activity yet",
-            message = "Shared links, calls and clipboard syncs will appear here once this phone is paired with a Mac.",
-        ) { AvailabilityPill(Availability.PLANNED) }
+        Footnote("Available features are started from Conduit for Mac while this phone is connected.")
     }
 }
 
@@ -577,10 +518,10 @@ fun SettingsContent(
 
     ScreenColumn("Settings") {
         SectionLabel("Appearance")
-        PillSegments(ThemeMode.entries, themeMode, label = { it.label }, onSelect = onThemeMode)
+        Segmented(ThemeMode.entries, themeMode, label = { it.label }, onSelect = onThemeMode)
 
         SectionLabel("Connection")
-        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+        FlatBox {
             SwitchRow(
                 icon = Icons.Rounded.WifiTethering,
                 title = "Wireless debugging",
@@ -588,7 +529,7 @@ fun SettingsContent(
                 checked = phone.wirelessDebugging,
                 onCheckedChange = onWirelessDebugging,
             )
-            CardDivider()
+            Line()
             SwitchRow(
                 icon = Icons.Rounded.Coffee,
                 title = "Stay awake while charging",
@@ -596,64 +537,39 @@ fun SettingsContent(
                 checked = phone.stayAwakeWhileCharging,
                 onCheckedChange = onStayAwake,
             )
-            CardDivider()
-            Row(Modifier.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconBubble(Icons.Rounded.DeveloperMode)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Developer options", color = canvas.content, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        if (phone.canChange) {
-                            "Conduit can change the switches above for you."
-                        } else {
-                            "To use the switches above, click Allow in Conduit for Mac → Devices."
-                        },
-                        color = canvas.contentSecondary,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-            PillButton("Open Developer options", modifier = Modifier.fillMaxWidth()) {
-                onOpen(SystemScreen.DEVELOPER_OPTIONS)
-            }
+            Line()
+            ItemRow(
+                "Developer options",
+                supporting = if (phone.canChange) {
+                    "Conduit can change the switches above for you."
+                } else {
+                    "To use the switches above, click Allow in Conduit for Mac → Devices."
+                },
+                icon = Icons.Rounded.DeveloperMode,
+                onClick = { onOpen(SystemScreen.DEVELOPER_OPTIONS) },
+            ) { Chevron() }
         }
 
         SectionLabel("Notifications")
-        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
-            Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconBubble(Icons.Rounded.Notifications)
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Notifications on your Mac", color = canvas.content, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        if (notificationsOn) {
-                            "Your linked Mac shows what arrives here. Nothing ongoing, and nothing from an app " +
-                                "switched off below, ever leaves this phone."
-                        } else {
-                            "Android has to let Conduit see notifications before your Mac can show them."
-                        },
-                        color = canvas.contentSecondary,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+        FlatBox {
+            ItemRow(
+                "Notifications on your Mac",
+                supporting = if (notificationsOn) {
+                    "Your linked Mac shows what arrives here. Nothing ongoing, and nothing from an app " +
+                        "switched off below, ever leaves this phone."
+                } else {
+                    "Android has to let Conduit see notifications before your Mac can show them. Tap to allow it."
+                },
+                icon = Icons.Rounded.Notifications,
+                onClick = { onOpen(SystemScreen.NOTIFICATION_ACCESS) },
+            ) {
+                TrailingText(if (notificationsOn) "On" else "Off")
             }
-            PillButton(
-                if (notificationsOn) "Change notification access" else "Allow notification access",
-                modifier = Modifier.fillMaxWidth(),
-            ) { onOpen(SystemScreen.NOTIFICATION_ACCESS) }
-
             if (notificationsOn && notificationApps.isNotEmpty()) {
-                CardDivider()
-                Text(
-                    "Apps that have sent one since then",
-                    color = canvas.contentSecondary,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
-                )
-                notificationApps.forEachIndexed { index, app ->
-                    if (index > 0) CardDivider()
+                notificationApps.forEach { app ->
+                    Line()
                     SwitchRow(
-                        icon = Icons.Rounded.Apps,
+                        icon = null,
                         title = app.name,
                         supporting = if (app.allowed) "Goes to your Mac" else "Stays on this phone",
                         checked = app.allowed,
@@ -664,45 +580,31 @@ fun SettingsContent(
         }
 
         SectionLabel("Privacy")
-        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
-            Row(verticalAlignment = Alignment.Top) {
-                IconBubble(Icons.Rounded.PrivacyTip)
-                Spacer(Modifier.width(14.dp))
-                Column {
-                    Text(
-                        "Conduit asks for each permission only when you use the feature that needs it. " +
-                            "Nothing from this app is included in backups or device transfers.",
-                        color = canvas.contentSecondary,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "While Conduit for Mac mirrors this phone with its screen off, it turns on Conduit touch " +
-                            "guard: an accessibility service that ignores touches on the phone and reads nothing " +
-                            "on the screen. Pressing the power button turns it off.",
-                        color = canvas.contentSecondary,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
+        FlatBox {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Conduit asks for each permission only when you use the feature that needs it. " +
+                        "Nothing from this app is included in backups or device transfers.",
+                    color = canvas.contentSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "While Conduit for Mac mirrors this phone with its screen off, it turns on Conduit touch " +
+                        "guard: an accessibility service that ignores touches on the phone and reads nothing " +
+                        "on the screen. Pressing the power button turns it off.",
+                    color = canvas.contentSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
             }
         }
 
         SectionLabel("About")
-        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ConduitMark(44.dp)
-                Spacer(Modifier.width(14.dp))
-                Column {
-                    Text(
-                        DesignTokens.Brand.NAME,
-                        color = canvas.content,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-                    )
-                    Text("Version $version", color = canvas.contentSecondary, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            Text(DesignTokens.Brand.TAGLINE, color = canvas.contentSecondary, style = MaterialTheme.typography.bodyMedium)
+        FlatBox {
+            ItemRow(
+                DesignTokens.Brand.NAME,
+                supporting = "Version $version · ${DesignTokens.Brand.TAGLINE}",
+                leading = { ConduitMark(32.dp) },
+            )
         }
     }
 }

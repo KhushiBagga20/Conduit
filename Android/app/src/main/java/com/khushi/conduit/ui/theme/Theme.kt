@@ -42,21 +42,25 @@ val LocalStatusColors = staticCompositionLocalOf {
 }
 
 /**
- * The canvas the Android interface is drawn on: a near-black (or soft white)
- * ground with a faint dot grid, glass panels, raised controls and one lime
- * highlight. Vivid gradient cards sit on top of it.
+ * The canvas the Android interface is drawn on: flat and quiet. A solid
+ * ground, boxes edged with a hairline, one monochrome accent — and colour
+ * only where it says something, like a status.
  */
 @Immutable
 data class CanvasPalette(
     val isDark: Boolean,
+    /** The page. */
     val background: Color,
-    val grid: Color,
-    val glass: Color,
-    val glassBorder: Color,
-    val raised: Color,
+    /** Inside a box. */
+    val surface: Color,
+    /** Box edges and the lines between rows. */
+    val line: Color,
     val content: Color,
     val contentSecondary: Color,
-    val lime: Color,
+    val contentTertiary: Color,
+    /** The one highlight: switches that are on, the primary button. */
+    val accent: Color,
+    val onAccent: Color,
 )
 
 val LocalCanvas = staticCompositionLocalOf { canvasPalette(dark = true) }
@@ -64,36 +68,27 @@ val LocalCanvas = staticCompositionLocalOf { canvasPalette(dark = true) }
 fun canvasPalette(dark: Boolean) = if (dark) {
     CanvasPalette(
         isDark = true,
-        background = Color(0xFF050507),
-        grid = Color.White.copy(alpha = 0.07f),
-        glass = Color(0xFF15151B).copy(alpha = 0.92f),
-        glassBorder = Color.White.copy(alpha = 0.08f),
-        raised = Color(0xFF1B1B22),
-        content = Color(0xFFF4F4F8),
-        contentSecondary = Color.White.copy(alpha = 0.58f),
-        lime = Color(0xFFD6F55B),
+        background = Color(0xFF000000),
+        surface = Color(0xFF0D0D0F),
+        line = Color.White.copy(alpha = 0.13f),
+        content = Color(0xFFF5F5F7),
+        contentSecondary = Color.White.copy(alpha = 0.62f),
+        contentTertiary = Color.White.copy(alpha = 0.38f),
+        accent = Color(0xFFF5F5F7),
+        onAccent = Color(0xFF000000),
     )
 } else {
     CanvasPalette(
         isDark = false,
-        background = Color(0xFFF1F1F5),
-        grid = Color.Black.copy(alpha = 0.07f),
-        glass = Color.White.copy(alpha = 0.92f),
-        glassBorder = Color.Black.copy(alpha = 0.06f),
-        raised = Color.White,
-        content = Color(0xFF121216),
-        contentSecondary = Color.Black.copy(alpha = 0.55f),
-        lime = Color(0xFF7FA21A),
+        background = Color(0xFFFFFFFF),
+        surface = Color(0xFFF7F7F8),
+        line = Color.Black.copy(alpha = 0.12f),
+        content = Color(0xFF111113),
+        contentSecondary = Color.Black.copy(alpha = 0.6f),
+        contentTertiary = Color.Black.copy(alpha = 0.38f),
+        accent = Color(0xFF111113),
+        onAccent = Color(0xFFFFFFFF),
     )
-}
-
-/** Card gradients, top to bottom. Text on them is always white. */
-object CardGradients {
-    val magenta = listOf(Color(0xFFE35CC9), Color(0xFF8A2FC4), Color(0xFF32105E))
-    val indigo = listOf(Color(0xFF7472FF), Color(0xFF3C3CC8), Color(0xFF161761))
-    val ember = listOf(Color(0xFFFF8A4C), Color(0xFFE44D2E), Color(0xFF6E1A10))
-    val graphiteDark = listOf(Color(0xFF2B2B33), Color(0xFF131318))
-    val graphiteLight = listOf(Color(0xFFFFFFFF), Color(0xFFE7E7EE))
 }
 
 private fun ColorToken.resolve(dark: Boolean) = Color(if (dark) this.dark else light)

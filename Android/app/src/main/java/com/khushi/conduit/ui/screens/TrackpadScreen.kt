@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,8 +38,8 @@ import com.khushi.conduit.core.protocol.InputEvent
 import com.khushi.conduit.core.protocol.PointerButton
 import com.khushi.conduit.link.LinkHub
 import com.khushi.conduit.link.LinkService
-import com.khushi.conduit.ui.components.PillButton
-import com.khushi.conduit.ui.components.dotGrid
+import com.khushi.conduit.ui.components.BoxShape
+import com.khushi.conduit.ui.components.FlatButton
 import com.khushi.conduit.ui.theme.LocalCanvas
 import com.khushi.conduit.ui.theme.LocalStatusColors
 import kotlin.math.max
@@ -80,7 +79,6 @@ fun TrackpadScreen(onDone: () -> Unit) {
         Modifier
             .fillMaxSize()
             .background(canvas.background)
-            .dotGrid(canvas.grid, pitch = 18.dp, radius = 1.dp)
             .systemBarsPadding(),
     ) {
         Row(
@@ -110,8 +108,8 @@ fun TrackpadScreen(onDone: () -> Unit) {
         TrackpadSurface(Modifier.weight(1f).fillMaxWidth().padding(16.dp), enabled = ready, refusal = refusal)
 
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PillButton("Click", Modifier.weight(1f)) { click(PointerButton.LEFT) }
-            PillButton("Right click", Modifier.weight(1f)) { click(PointerButton.RIGHT) }
+            FlatButton("Click", Modifier.weight(1f), primary = false) { click(PointerButton.LEFT) }
+            FlatButton("Right click", Modifier.weight(1f), primary = false) { click(PointerButton.RIGHT) }
         }
 
         Text(
@@ -138,9 +136,9 @@ private fun TrackpadSurface(modifier: Modifier, enabled: Boolean, refusal: Strin
 
     Box(
         modifier
-            .clip(RoundedCornerShape(28.dp))
-            .background(canvas.glass)
-            .border(1.dp, canvas.glassBorder, RoundedCornerShape(28.dp))
+            .clip(BoxShape)
+            .background(canvas.surface)
+            .border(1.dp, canvas.line, BoxShape)
             .pointerInput(enabled, density) {
                 if (!enabled) return@pointerInput
                 val slop = viewConfiguration.touchSlop * 1.6f

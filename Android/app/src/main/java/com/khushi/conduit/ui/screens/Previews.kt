@@ -23,9 +23,10 @@ internal fun HomeSample(dark: Boolean, phone: PhoneSetupSample = PhoneSetupSampl
                 wifi = wifi,
                 battery = Battery(percent = 82, charging = true, source = "USB"),
                 phoneName = "Galaxy S24 Ultra",
-                onWirelessDebugging = {},
-                onStayAwake = {},
+                link = LinkHub.State(),
                 onOpen = {},
+                onTrackpad = {},
+                onRing = {},
             )
         }
     }

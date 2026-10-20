@@ -1,22 +1,21 @@
 package com.khushi.conduit.ui.components
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,6 +24,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.ContentPaste
@@ -46,18 +46,14 @@ import androidx.compose.material3.SwitchColors
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -71,9 +67,16 @@ import androidx.compose.ui.unit.sp
 import com.khushi.conduit.core.design.DesignTokens
 import com.khushi.conduit.core.protocol.Availability
 import com.khushi.conduit.core.protocol.FeatureId
-import com.khushi.conduit.ui.theme.CardGradients
 import com.khushi.conduit.ui.theme.LocalCanvas
 import com.khushi.conduit.ui.theme.LocalStatusColors
+
+// The flat vocabulary of Conduit for Android: boxes edged with a hairline,
+// rows divided by lines, plain icons, and one monochrome accent. Nothing
+// glows, nothing floats; colour appears only where it means something.
+
+val BoxShape = RoundedCornerShape(12.dp)
+val ButtonShape = RoundedCornerShape(10.dp)
+private val TagShape = RoundedCornerShape(6.dp)
 
 // Status
 
@@ -97,322 +100,234 @@ fun StatusDot(tone: StatusTone, size: Dp = 8.dp) {
 
 // Surfaces
 
-val HeroShape = RoundedCornerShape(40.dp)
-val CardShape = RoundedCornerShape(28.dp)
-
-/**
- * A vivid gradient card with light falling on its upper edge and a glow of
- * its own colour behind it — the signature surface of Conduit for Android.
- * Content on it is white.
- */
+/** A box: rows inside it are divided by [Line]. */
 @Composable
-fun GradientCard(
-    colors: List<Color>,
-    modifier: Modifier = Modifier,
-    shape: Shape = CardShape,
-    content: @Composable BoxScope.() -> Unit,
-) {
-    val glow = colors.getOrElse(1) { colors.first() }
-    Box(
-        modifier
-            .shadow(20.dp, shape, ambientColor = glow, spotColor = glow)
-            .clip(shape)
-            .drawWithCache {
-                val body = Brush.verticalGradient(colors)
-                val sheen = Brush.radialGradient(
-                    listOf(Color.White.copy(alpha = 0.30f), Color.Transparent),
-                    center = Offset(size.width * 0.18f, 0f),
-                    radius = (size.maxDimension * 0.8f).coerceAtLeast(1f),
-                )
-                onDrawBehind {
-                    drawRect(body)
-                    drawRect(sheen)
-                }
-            }
-            .border(1.dp, Color.White.copy(alpha = 0.14f), shape),
-        content = content,
-    )
-}
-
-/** A quiet card on the canvas: graphite in the dark, soft white in the light. */
-@Composable
-fun PlainCard(
-    modifier: Modifier = Modifier,
-    padding: Dp = 20.dp,
-    content: @Composable ColumnScope.() -> Unit,
-) {
+fun FlatBox(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val canvas = LocalCanvas.current
     Column(
         modifier
-            .clip(CardShape)
-            .background(Brush.verticalGradient(if (canvas.isDark) CardGradients.graphiteDark else CardGradients.graphiteLight))
-            .border(1.dp, canvas.glassBorder, CardShape)
-            .padding(padding),
+            .fillMaxWidth()
+            .clip(BoxShape)
+            .background(canvas.surface)
+            .border(1.dp, canvas.line, BoxShape),
         content = content,
     )
 }
 
-/** A frosted, floating panel — the navigation bar and segmented controls. */
+/** The hairline between rows. */
 @Composable
-fun GlassPanel(
-    modifier: Modifier = Modifier,
-    shape: Shape = CircleShape,
-    content: @Composable RowScope.() -> Unit,
-) {
-    val canvas = LocalCanvas.current
-    Row(
-        modifier
-            .shadow(16.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
-            .clip(shape)
-            .background(canvas.glass)
-            .border(1.dp, canvas.glassBorder, shape),
-        verticalAlignment = Alignment.CenterVertically,
-        content = content,
-    )
+fun Line(modifier: Modifier = Modifier) {
+    HorizontalDivider(modifier, thickness = 1.dp, color = LocalCanvas.current.line)
 }
 
+/** Breathing room at the end of a scrolling screen. */
 @Composable
-fun CardDivider() {
-    HorizontalDivider(color = LocalCanvas.current.glassBorder)
+fun BottomSpacer() {
+    Spacer(Modifier.height(24.dp))
 }
 
-/** Room at the end of a scrolling screen so nothing hides under the floating bar. */
-@Composable
-fun BottomBarSpacer() {
-    Spacer(Modifier.navigationBarsPadding().height(104.dp))
-}
-
-// Controls
-
-/** A round raised button with an icon. */
-@Composable
-fun CircleButton(
-    icon: ImageVector,
-    contentDescription: String,
-    modifier: Modifier = Modifier,
-    onGradient: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val canvas = LocalCanvas.current
-    val fill = if (onGradient) Color.White.copy(alpha = 0.18f) else canvas.raised
-    val border = if (onGradient) Color.White.copy(alpha = 0.22f) else canvas.glassBorder
-    val tint = if (onGradient) Color.White else canvas.content
-    Box(
-        modifier
-            .size(46.dp)
-            .clip(CircleShape)
-            .background(fill)
-            .border(1.dp, border, CircleShape)
-            .clickable(role = Role.Button, onClickLabel = contentDescription, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(22.dp))
-    }
-}
-
-/** An icon in a soft circle, for list rows and card corners. */
-@Composable
-fun IconBubble(icon: ImageVector, modifier: Modifier = Modifier, onGradient: Boolean = false, size: Dp = 40.dp) {
-    val canvas = LocalCanvas.current
-    Box(
-        modifier
-            .size(size)
-            .background(if (onGradient) Color.White.copy(alpha = 0.18f) else canvas.content.copy(alpha = 0.07f), CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = null, tint = if (onGradient) Color.White else canvas.content, modifier = Modifier.size(size * 0.5f))
-    }
-}
-
-/** A pill-shaped action. */
-@Composable
-fun PillButton(text: String, modifier: Modifier = Modifier, icon: ImageVector? = null, onClick: () -> Unit) {
-    val canvas = LocalCanvas.current
-    Row(
-        modifier
-            .heightIn(min = 52.dp)
-            .clip(CircleShape)
-            .background(canvas.content)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 22.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        if (icon != null) {
-            Icon(icon, contentDescription = null, tint = canvas.background, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(10.dp))
-        }
-        Text(text, color = canvas.background, style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp))
-    }
-}
-
-/** Segmented choice drawn as pills in a glass track. */
-@Composable
-fun <T> PillSegments(options: List<T>, selected: T, label: (T) -> String, modifier: Modifier = Modifier, onSelect: (T) -> Unit) {
-    val canvas = LocalCanvas.current
-    GlassPanel(modifier.fillMaxWidth().height(52.dp)) {
-        Spacer(Modifier.width(4.dp))
-        options.forEach { option ->
-            val isSelected = option == selected
-            val fill by animateColorAsState(if (isSelected) canvas.content else Color.Transparent, label = "segment")
-            Box(
-                Modifier
-                    .weight(1f)
-                    .height(44.dp)
-                    .clip(CircleShape)
-                    .background(fill)
-                    .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(option) }),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    label(option),
-                    color = if (isSelected) canvas.background else canvas.contentSecondary,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                )
-            }
-        }
-        Spacer(Modifier.width(4.dp))
-    }
-}
-
-/** Switch colours on a gradient card: a white knob on a translucent track. */
-@Composable
-fun gradientSwitchColors(): SwitchColors = SwitchDefaults.colors(
-    checkedThumbColor = Color.White,
-    checkedTrackColor = Color.White.copy(alpha = 0.34f),
-    checkedBorderColor = Color.Transparent,
-    uncheckedThumbColor = Color.White.copy(alpha = 0.85f),
-    uncheckedTrackColor = Color.Black.copy(alpha = 0.25f),
-    uncheckedBorderColor = Color.White.copy(alpha = 0.3f),
-)
-
-/** Switch colours on the canvas: lime when on. */
-@Composable
-fun canvasSwitchColors(): SwitchColors {
-    val canvas = LocalCanvas.current
-    return SwitchDefaults.colors(
-        checkedThumbColor = canvas.background,
-        checkedTrackColor = canvas.lime,
-        checkedBorderColor = Color.Transparent,
-        uncheckedThumbColor = canvas.contentSecondary,
-        uncheckedTrackColor = canvas.raised,
-        uncheckedBorderColor = canvas.content.copy(alpha = 0.18f),
-    )
-}
+// Rows
 
 /**
- * A large toggle card: graphite while off, lit with its gradient while on.
- * The whole card is the switch. When Conduit is not yet allowed to change
- * the setting a lock shows, and tapping explains how to allow it.
+ * One row in a box: an icon, a title, a line of supporting text, and
+ * whatever belongs at the end — a value, an action, a switch. The whole row
+ * is the target when it does something.
  */
 @Composable
-fun ToggleCard(
+fun ItemRow(
     title: String,
-    stateText: String,
-    icon: ImageVector,
-    checked: Boolean,
-    colors: List<Color>,
     modifier: Modifier = Modifier,
-    locked: Boolean = false,
-    onCheckedChange: (Boolean) -> Unit,
+    supporting: String? = null,
+    supportingColor: Color? = null,
+    icon: ImageVector? = null,
+    onClick: (() -> Unit)? = null,
+    leading: (@Composable () -> Unit)? = null,
+    trailing: @Composable RowScope.() -> Unit = {},
 ) {
     val canvas = LocalCanvas.current
-    val body: @Composable () -> Unit = {
-        val onGradient = checked
-        val content = if (onGradient) Color.White else canvas.content
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(min = 150.dp)
-                .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
-                .padding(16.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconBubble(icon, onGradient = onGradient)
-                Spacer(Modifier.weight(1f))
-                Switch(
-                    checked = checked,
-                    onCheckedChange = null,
-                    colors = if (onGradient) gradientSwitchColors() else canvasSwitchColors(),
-                )
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when {
+            leading != null -> {
+                leading()
+                Spacer(Modifier.width(14.dp))
             }
-            Spacer(Modifier.height(18.dp))
+            icon != null -> {
+                Icon(icon, contentDescription = null, tint = canvas.content, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(16.dp))
+            }
+        }
+        Column(Modifier.weight(1f)) {
             Text(
                 title,
-                color = content,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                color = canvas.content,
+                style = MaterialTheme.typography.bodyLarge,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (locked) {
-                    Icon(
-                        Icons.Rounded.Lock,
-                        contentDescription = "Needs permission",
-                        tint = content.copy(alpha = 0.7f),
-                        modifier = Modifier.size(13.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                }
+            if (supporting != null) {
                 Text(
-                    stateText,
-                    color = content.copy(alpha = 0.72f),
+                    supporting,
+                    color = supportingColor ?: canvas.contentSecondary,
                     style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-    }
-    if (checked) {
-        GradientCard(colors, modifier) { body() }
-    } else {
-        PlainCard(modifier, padding = 0.dp) { body() }
+        Spacer(Modifier.width(12.dp))
+        trailing()
     }
 }
 
-/** A settings row with a switch; the whole row toggles. */
+/** A value at the end of a row. */
+@Composable
+fun TrailingText(text: String, color: Color? = null) {
+    Text(
+        text,
+        color = color ?: LocalCanvas.current.contentSecondary,
+        style = MaterialTheme.typography.bodyMedium,
+        maxLines = 1,
+    )
+}
+
+/** Says a row goes somewhere. */
+@Composable
+fun Chevron() {
+    Icon(
+        Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+        contentDescription = null,
+        tint = LocalCanvas.current.contentTertiary,
+        modifier = Modifier.size(20.dp),
+    )
+}
+
+/** A small text action at the end of a row. */
+@Composable
+fun RowAction(text: String, secondary: Boolean = false, onClick: () -> Unit) {
+    val canvas = LocalCanvas.current
+    TextButton(onClick = onClick, shape = ButtonShape) {
+        Text(text, color = if (secondary) canvas.contentSecondary else canvas.content, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+/** A row with a switch; the whole row toggles. */
 @Composable
 fun SwitchRow(
-    icon: ImageVector,
+    icon: ImageVector?,
     title: String,
     supporting: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
+    ItemRow(
+        title = title,
+        supporting = supporting,
+        icon = icon,
+        modifier = Modifier.toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange),
+    ) {
+        Switch(checked = checked, onCheckedChange = null, colors = flatSwitchColors())
+    }
+}
+
+@Composable
+fun flatSwitchColors(): SwitchColors {
+    val canvas = LocalCanvas.current
+    return SwitchDefaults.colors(
+        checkedThumbColor = canvas.onAccent,
+        checkedTrackColor = canvas.accent,
+        checkedBorderColor = canvas.accent,
+        uncheckedThumbColor = canvas.contentTertiary,
+        uncheckedTrackColor = canvas.background,
+        uncheckedBorderColor = canvas.line,
+    )
+}
+
+// Controls
+
+/**
+ * A flat button. The primary one is filled with the accent; the other is a
+ * hairline outline.
+ */
+@Composable
+fun FlatButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    primary: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val canvas = LocalCanvas.current
+    val fill = if (primary) canvas.accent else Color.Transparent
+    val ink = if (primary) canvas.onAccent else canvas.content
+    Row(
+        modifier
+            .heightIn(min = 48.dp)
+            .clip(ButtonShape)
+            .background(fill)
+            .then(if (primary) Modifier else Modifier.border(1.dp, canvas.line, ButtonShape))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(text, color = ink, style = MaterialTheme.typography.labelLarge.copy(fontSize = 15.sp))
+    }
+}
+
+/** A choice of a few, drawn as one box split into equal cells. */
+@Composable
+fun <T> Segmented(options: List<T>, selected: T, label: (T) -> String, modifier: Modifier = Modifier, onSelect: (T) -> Unit) {
     val canvas = LocalCanvas.current
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
-            .padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .height(IntrinsicSize.Min)
+            .clip(ButtonShape)
+            .border(1.dp, canvas.line, ButtonShape),
     ) {
-        IconBubble(icon)
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = canvas.content, style = MaterialTheme.typography.titleMedium)
-            Text(supporting, color = canvas.contentSecondary, style = MaterialTheme.typography.bodySmall)
+        options.forEachIndexed { index, option ->
+            if (index > 0) VerticalDivider(Modifier.fillMaxHeight(), thickness = 1.dp, color = canvas.line)
+            val isSelected = option == selected
+            Box(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp)
+                    .background(if (isSelected) canvas.accent else Color.Transparent)
+                    .selectable(selected = isSelected, role = Role.Tab, onClick = { onSelect(option) }),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label(option),
+                    color = if (isSelected) canvas.onAccent else canvas.contentSecondary,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                )
+            }
         }
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = null, colors = canvasSwitchColors())
     }
 }
 
 /**
- * A status pill — Available, Planned, Requires permission — so nothing looks
- * usable that is not.
+ * Whether a feature works today — Available, Planned, Requires permission —
+ * as a small outlined tag, so nothing looks usable that is not.
  */
 @Composable
-fun AvailabilityPill(availability: Availability, modifier: Modifier = Modifier, onGradient: Boolean = false) {
+fun AvailabilityTag(availability: Availability, modifier: Modifier = Modifier) {
     val status = LocalStatusColors.current
     val canvas = LocalCanvas.current
-    val color = when {
-        onGradient -> Color.White
-        availability == Availability.AVAILABLE || availability == Availability.ACTIVE -> status.connected
-        availability == Availability.REQUIRES_PERMISSION || availability == Availability.REQUIRES_SETUP -> status.working
-        availability == Availability.UNSUPPORTED -> status.error
+    val color = when (availability) {
+        Availability.AVAILABLE, Availability.ACTIVE -> status.connected
+        Availability.REQUIRES_PERMISSION, Availability.REQUIRES_SETUP -> status.working
+        Availability.UNSUPPORTED -> status.error
         else -> canvas.contentSecondary
     }
     Text(
@@ -421,9 +336,8 @@ fun AvailabilityPill(availability: Availability, modifier: Modifier = Modifier, 
         color = color,
         maxLines = 1,
         modifier = modifier
-            .clip(CircleShape)
-            .background(color.copy(alpha = if (onGradient) 0.2f else 0.13f))
-            .padding(horizontal = 10.dp, vertical = 4.dp),
+            .border(1.dp, color.copy(alpha = 0.5f), TagShape)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
     )
 }
 
@@ -436,50 +350,64 @@ fun ScreenTitle(text: String, modifier: Modifier = Modifier) {
         modifier = modifier,
         color = LocalCanvas.current.content,
         style = MaterialTheme.typography.headlineSmall.copy(
-            fontSize = 30.sp,
+            fontSize = 28.sp,
             fontWeight = FontWeight.SemiBold,
-            letterSpacing = (-0.5).sp,
+            letterSpacing = (-0.4).sp,
         ),
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )
 }
 
+/** The small heading above a box. */
 @Composable
 fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
-        text,
-        modifier = modifier.padding(start = 4.dp, top = 12.dp),
+        text.uppercase(),
+        modifier = modifier.padding(start = 4.dp, top = 16.dp, bottom = 2.dp),
         color = LocalCanvas.current.contentSecondary,
-        style = MaterialTheme.typography.labelLarge.copy(fontSize = 14.sp),
+        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.8.sp),
+    )
+}
+
+/** A note under a box. */
+@Composable
+fun Footnote(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        modifier = modifier.padding(horizontal = 4.dp),
+        color = LocalCanvas.current.contentSecondary,
+        style = MaterialTheme.typography.bodySmall,
     )
 }
 
 // Empty and permission states
 
-/** An empty state around a dotted sphere. */
+/** Nothing here yet: what this is, and the one thing to do about it. */
 @Composable
-fun DottedEmptyState(
+fun EmptyState(
     title: String,
     message: String,
     modifier: Modifier = Modifier,
     footer: @Composable () -> Unit = {},
 ) {
     val canvas = LocalCanvas.current
-    Column(modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        DottedSphere(color = canvas.content, diameter = 180.dp)
-        Spacer(Modifier.height(20.dp))
-        Text(title, color = canvas.content, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            message,
-            color = canvas.contentSecondary,
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 12.dp),
-        )
-        Spacer(Modifier.height(14.dp))
-        footer()
+    FlatBox(modifier) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(title, color = canvas.content, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                message,
+                color = canvas.contentSecondary,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(18.dp))
+            footer()
+        }
     }
 }
 
@@ -507,27 +435,29 @@ fun NeedsPermissionDialog(onOpenDeveloperOptions: () -> Unit, onDismiss: () -> U
 
 // Brand
 
-/** Conduit's mark: two nodes joined by a flowing line, on the brand gradient. */
+/** Conduit's mark: two nodes joined by a flowing line, drawn in one ink. */
 @Composable
 fun ConduitMark(size: Dp = 32.dp) {
+    val canvas = LocalCanvas.current
     Box(
         Modifier
             .size(size)
-            .background(Brush.linearGradient(CardGradients.magenta.take(2) + CardGradients.indigo.first()), CircleShape),
+            .clip(RoundedCornerShape(size * 0.28f))
+            .border(1.dp, canvas.line, RoundedCornerShape(size * 0.28f)),
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.size(size * 0.56f)) {
             val w = this.size.width
-            val stroke = w * 0.11f
+            val stroke = w * 0.1f
             val a = Offset(w * 0.22f, w * 0.22f)
             val b = Offset(w * 0.78f, w * 0.78f)
             val path = Path().apply {
                 moveTo(a.x, a.y)
                 cubicTo(w * 0.72f, a.y, w * 0.28f, b.y, b.x, b.y)
             }
-            drawPath(path, Color.White, style = Stroke(width = stroke, cap = StrokeCap.Round))
-            drawCircle(Color.White, radius = stroke * 1.15f, center = a)
-            drawCircle(Color.White, radius = stroke * 1.15f, center = b)
+            drawPath(path, canvas.content, style = Stroke(width = stroke, cap = StrokeCap.Round))
+            drawCircle(canvas.content, radius = stroke * 1.2f, center = a)
+            drawCircle(canvas.content, radius = stroke * 1.2f, center = b)
         }
     }
 }
@@ -552,7 +482,7 @@ fun FeatureId.title(): String =
 /** Features that work today, with Conduit for Mac. The rest are planned. */
 val featuresAvailableToday = setOf(
     FeatureId.MIRRORING, FeatureId.REMOTE_INPUT, FeatureId.CLIPBOARD, FeatureId.AUDIO,
-    FeatureId.LINKS, FeatureId.FIND_MAC, FeatureId.TRACKPAD,
+    FeatureId.LINKS, FeatureId.FIND_MAC, FeatureId.TRACKPAD, FeatureId.FILES,
 )
 
 fun FeatureId.detail(): String = when (this) {
