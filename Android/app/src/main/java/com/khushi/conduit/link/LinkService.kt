@@ -217,7 +217,7 @@ class LinkService : Service() {
 
     /** Where to try a paired Mac: what it told us over adb, then Bonjour, then where it was before. */
     private fun candidates(mac: LinkedMac): List<Pair<String, Int>> {
-        val hinted = MacHint.latest?.takeIf { it.id == mac.id }?.let { hint -> hint.hosts.map { it to hint.port } }.orEmpty()
+        val hinted = MacHint.latest(this)?.takeIf { it.id == mac.id }?.let { hint -> hint.hosts.map { it to hint.port } }.orEmpty()
         val nearby = discovery.results.filter { it.id == mac.id }.flatMap { found -> found.hosts.map { it to found.port } }
         val before = if (mac.port > 0) mac.addresses.map { it to mac.port } else emptyList()
         return (hinted + nearby + before).distinct()
@@ -615,7 +615,7 @@ class LinkService : Service() {
     private fun publishLinked() = LinkHub.update { it.copy(linked = macs.all().sortedByDescending(LinkedMac::lastSeen)) }
 
     private fun publishFound() = LinkHub.update { state ->
-        val hint = MacHint.latest
+        val hint = MacHint.latest(this)
         state.copy(found = (listOfNotNull(hint) + discovery.results).distinctBy { it.id ?: it.hosts.first() })
     }
 

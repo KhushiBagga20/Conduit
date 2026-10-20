@@ -81,6 +81,18 @@ public protocol ConduitCommands: AnyObject {
     /// Look again at what macOS allows and which ways the clipboard can flow.
     func refreshClipboardStatus()
 
+    // Files on the phone, over adb.
+    func openPhoneFolder(_ path: String)
+    func refreshPhoneFolder()
+    func downloadPhoneFiles(_ files: [PhoneFile], to folder: URL)
+    func uploadToPhone(_ urls: [URL])
+    func deletePhoneFiles(_ files: [PhoneFile])
+    func createPhoneFolder(named name: String)
+    /// Open a copy of a phone file in its Mac app.
+    func openPhoneFile(_ file: PhoneFile)
+    func cancelTransfer(id: UUID)
+    func clearFinishedTransfers()
+
     /// Ask macOS for the Accessibility permission the phone's trackpad needs.
     func requestTrackpadPermission()
 
@@ -120,6 +132,16 @@ public nonisolated struct Preferences: Codable, Sendable, Equatable {
     public var trackpadHaptics = true
     /// Show a phone notification on this Mac as it arrives.
     public var notificationBanners = true
+    /// Where files from the phone are saved; nil is the default, ~/S24U.
+    public var phoneDownloadsPath: String?
+
+    /// The folder files downloaded from the phone go into.
+    public var phoneDownloadsFolder: URL {
+        if let phoneDownloadsPath, !phoneDownloadsPath.isEmpty {
+            return URL(fileURLWithPath: phoneDownloadsPath, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("S24U", isDirectory: true)
+    }
 
     public init() {}
 
@@ -139,6 +161,7 @@ public nonisolated struct Preferences: Codable, Sendable, Equatable {
         naturalScrolling = try saved.decodeIfPresent(Bool.self, forKey: .naturalScrolling) ?? true
         trackpadHaptics = try saved.decodeIfPresent(Bool.self, forKey: .trackpadHaptics) ?? true
         notificationBanners = try saved.decodeIfPresent(Bool.self, forKey: .notificationBanners) ?? true
+        phoneDownloadsPath = try saved.decodeIfPresent(String.self, forKey: .phoneDownloadsPath)
     }
 }
 
@@ -162,6 +185,7 @@ public final class ConduitStore {
     public let mirroring = MirroringState()
     public let link = LinkState()
     public let clipboard = ClipboardState()
+    public let files = FilesState()
     public package(set) var activity: [ActivityEvent] = []
     /// What is showing on the linked phone, newest first. In memory only:
     /// Conduit never writes a notification down.

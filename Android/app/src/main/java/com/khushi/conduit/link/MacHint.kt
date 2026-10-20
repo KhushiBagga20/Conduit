@@ -28,15 +28,43 @@ class MacHint : BroadcastReceiver() {
             hosts = hosts,
             port = port,
         )
-        latest = found
+        remember(context, found)
         LinkHub.update { state -> state.copy(found = (listOf(found) + state.found.filterNot { it.id == found.id }).take(6)) }
         LinkService.poke(context)
         resultData = "noted"
     }
 
     companion object {
+        private const val PREFS = "conduit.machint"
+
         @Volatile
-        var latest: LinkHub.FoundMac? = null
-            private set
+        private var cached: LinkHub.FoundMac? = null
+
+        /**
+         * The last place a Mac said it can be reached. Kept across restarts
+         * and updates: MEASURED, a phone that forgot it after an update
+         * dialled only stale addresses from another network until the Mac
+         * happened to say it again. It holds addresses on the local network
+         * and a port — nothing that identifies a person.
+         */
+        fun latest(context: Context): LinkHub.FoundMac? {
+            cached?.let { return it }
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val hosts = prefs.getString("hosts", null)?.split(',')?.filter(String::isNotEmpty).orEmpty()
+            val port = prefs.getInt("port", 0)
+            if (hosts.isEmpty() || port <= 0) return null
+            return LinkHub.FoundMac(prefs.getString("id", null), prefs.getString("name", null) ?: "Mac", hosts, port)
+                .also { cached = it }
+        }
+
+        private fun remember(context: Context, found: LinkHub.FoundMac) {
+            cached = found
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString("id", found.id)
+                .putString("name", found.name)
+                .putString("hosts", found.hosts.joinToString(","))
+                .putInt("port", found.port)
+                .apply()
+        }
     }
 }

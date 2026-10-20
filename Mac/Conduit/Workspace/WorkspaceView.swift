@@ -41,6 +41,7 @@ struct WorkspaceView: View {
         case .devices: DevicesPage()
         case .settings: SettingsForm().navigationTitle("Settings")
         case .links: LinksPage()
+        case .files: FilesPage()
         case .notifications: NotificationsPage()
         case .trackpad: TrackpadPage()
         case .camera, .calls:
@@ -60,6 +61,7 @@ private struct Sidebar: View {
             Section("Phone") {
                 row(.overview)
                 row(.phoneScreen)
+                row(.files)
                 row(.trackpad)
                 row(.camera)
             }

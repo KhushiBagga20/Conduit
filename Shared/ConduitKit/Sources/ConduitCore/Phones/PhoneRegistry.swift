@@ -148,7 +148,6 @@ enum PhoneRegistry {
             // scrcpy's camera source needs Android 12; the Conduit interface for it is not built yet.
             .camera: major.map { $0 >= 12 } == false ? .unsupported : .planned,
             .calls: .planned,
-            .files: .planned,
         ]
     }
 }

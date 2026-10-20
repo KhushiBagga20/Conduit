@@ -7,6 +7,7 @@
 //  built yet are not shown — a switch that does nothing is worse than none.
 //
 
+import AppKit
 import ConduitDesign
 import ConduitState
 import SwiftUI
@@ -54,8 +55,20 @@ struct SettingsForm: View {
 
             Section("Clipboard") {
                 Toggle(isOn: binding(\.clipboardSync)) {
-                    Text("Sync the phone's clipboard to this Mac")
-                    Text("While mirroring. Conduit keeps no history.")
+                    Text("Sync the clipboard with the phone")
+                    Text("Both ways, without mirroring. Conduit keeps no history.")
+                }
+            }
+
+            Section("Files") {
+                LabeledContent {
+                    HStack {
+                        Button("Show") { NSWorkspace.shared.open(downloadsFolder) }
+                        Button("Change…") { chooseDownloadsFolder() }
+                    }
+                } label: {
+                    Text("Downloads from the phone go to")
+                    Text(downloadsFolder.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
                 }
             }
 
@@ -79,6 +92,20 @@ struct SettingsForm: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var downloadsFolder: URL { store.preferences.phoneDownloadsFolder }
+
+    private func chooseDownloadsFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.directoryURL = downloadsFolder
+        panel.prompt = "Use This Folder"
+        panel.message = "Files you download from the phone will be saved here."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        store.commands?.updatePreferences { $0.phoneDownloadsPath = url.path }
     }
 
     private func binding(_ keyPath: WritableKeyPath<Preferences, Bool>) -> Binding<Bool> {

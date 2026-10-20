@@ -17,6 +17,7 @@ extension ConduitStore {
     func availability(_ feature: FeatureID) -> Availability {
         switch feature {
         case .links, .findMac: link.hasConnectedPhone ? .available : .requiresSetup
+        case .files: files.isAvailable ? .available : .requiresSetup
         case .notifications:
             if !link.hasConnectedPhone { .requiresSetup }
             else if !link.notificationsReady { .requiresPermission }
@@ -136,13 +137,13 @@ extension FeatureID {
         switch self {
         case .mirroring: "See the phone's screen on this Mac."
         case .remoteInput: "Control the phone with this Mac's mouse, trackpad and keyboard while mirroring."
-        case .clipboard: "Copy on one device and paste on the other while mirroring."
+        case .clipboard: "Copy on one device and paste on the other."
         case .audio: "Hear the phone on this Mac while mirroring. Needs Android 11."
         case .trackpad: "Turn the phone into a trackpad for this Mac. Needs macOS Accessibility permission."
         case .camera: "Use the phone's cameras inside Conduit. Needs Android 12."
         case .calls: "Answer, decline and place calls from this Mac. Call audio stays on the phone."
         case .links: "Send web links between this Mac and the phone over Conduit Link."
-        case .files: "Send files between this Mac and the phone."
+        case .files: "Browse the phone's storage, and move files and folders both ways, over USB or Wi-Fi."
         case .notifications: "See the phone's notifications on this Mac, and dismiss them from here."
         case .findMac: "Ring this Mac from the phone, over Conduit Link, when you cannot find it."
         }

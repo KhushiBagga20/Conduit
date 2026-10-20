@@ -29,7 +29,7 @@ and works over any network the two share — including the phone's hotspot.
 | **C · Device state** | Battery, charging and network shown on the Mac from the phone itself, not from adb polling | B | Planned |
 | **D · Links** | Share a link from the phone to the Mac and back, from the share sheet and the menu bar | B | Done — checked both ways on the phone |
 | **E · Find my Mac** | Ring this Mac from the phone | B | Done — rang on the phone's request |
-| **F · Files** | Send a file each way, over the link's file channel | B | Planned |
+| **F · Files** | Browse the phone and move files both ways; edit in place; then over the link's file channel, and in Finder | B | In progress — browsing and moving files and folders over adb is built and checked on the phone (adb's own sync protocol, byte for byte, as fast as adb); editing in place is next |
 | **G · Notifications** | Phone notifications on the Mac, opt-in per app, with dismiss | B | Built — check pending: Android 16 treats notification access for a sideloaded app as a restricted setting, and it has not been granted yet |
 | **H · Phone as trackpad** | The phone's screen drives the Mac's pointer; needs macOS Accessibility permission | B | Built, not working yet — the Mac had never been granted Accessibility, and no pointer has moved from the phone |
 | **I · Calls** | Incoming call events on the Mac, and answer/decline where Android allows it | B, G | Planned |

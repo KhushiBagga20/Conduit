@@ -57,6 +57,8 @@ public final class ConduitEngine: ConduitCommands {
     private var lastPhoneInput = Date.distantPast
     private var trackpadIdleCheck: DispatchWorkItem?
     private var lastTrustCheck = Date.distantPast
+    /// Repeats this Mac's address to attached phones while none is linked.
+    private var hintTimer: Timer?
     /// The request ID of the notification list this Mac asked the phone for.
     private var notificationSyncID: String?
 
@@ -78,6 +80,7 @@ public final class ConduitEngine: ConduitCommands {
     private var lastClipboardToPhoneActivity = Date.distantPast
     private let macClipboard = MacClipboardWatcher()
     private var phoneClipboard: PhoneClipboardSession?
+    private var phoneFiles: PhoneFiles?
     /// A digest of the last text that crossed, either way — so text that
     /// just arrived is not sent straight back. Never the text itself.
     private var lastClipboardDigest: Data?
@@ -121,6 +124,8 @@ public final class ConduitEngine: ConduitCommands {
             return
         }
         store.tools.adb = .available(path: adb.path)
+
+        phoneFiles = PhoneFiles(adb: adb, state: store.files)
 
         let phoneClipboard = PhoneClipboardSession(adb: adb)
         phoneClipboard.onClipboard = { [weak self] text in self?.deviceClipboardChanged(text) }
@@ -431,6 +436,16 @@ public final class ConduitEngine: ConduitCommands {
         linkServer = server
         server.start()
         publishLinkedPhones()
+
+        // A phone that restarted or updated may have lost where this Mac
+        // is; while none is linked, say it again now and then over adb.
+        hintTimer?.invalidate()
+        hintTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.linkedNow.isEmpty else { return }
+                self.sendLinkHintToAttachedPhones()
+            }
+        }
         watchForGoingOffline()
     }
 
@@ -1054,7 +1069,12 @@ public final class ConduitEngine: ConduitCommands {
     }
 
     private func publishPhones() {
-        defer { updatePhoneClipboard() }
+        defer {
+            updatePhoneClipboard()
+            phoneFiles?.use(serial: store.activePhoneID.flatMap {
+                PhoneRegistry.targets(for: $0, attached: Array(attached.values)).first?.serial
+            })
+        }
         store.phones = PhoneRegistry.phones(attached: Array(attached.values), known: known,
                                             preferredID: store.preferences.preferredPhoneID,
                                             companionApps: companionApps,
@@ -1138,6 +1158,18 @@ public final class ConduitEngine: ConduitCommands {
         announcePendingConnections()
         mirroring?.phonesChanged()
     }
+
+    // MARK: - Files
+
+    public func openPhoneFolder(_ path: String) { phoneFiles?.open(path) }
+    public func refreshPhoneFolder() { phoneFiles?.refresh() }
+    public func downloadPhoneFiles(_ files: [PhoneFile], to folder: URL) { phoneFiles?.download(files, to: folder) }
+    public func uploadToPhone(_ urls: [URL]) { phoneFiles?.upload(urls) }
+    public func deletePhoneFiles(_ files: [PhoneFile]) { phoneFiles?.delete(files) }
+    public func createPhoneFolder(named name: String) { phoneFiles?.createFolder(named: name) }
+    public func openPhoneFile(_ file: PhoneFile) { phoneFiles?.openCopy(file) }
+    public func cancelTransfer(id: UUID) { phoneFiles?.cancel(id) }
+    public func clearFinishedTransfers() { phoneFiles?.clearFinished() }
 
     // MARK: - Clipboard
 
