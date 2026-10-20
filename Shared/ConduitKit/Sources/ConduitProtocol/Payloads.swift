@@ -60,6 +60,40 @@ public struct NetworkStatus: Codable, Sendable, Equatable {
     }
 }
 
+/// One notification showing on the phone — Shared/Protocol/README.md §6.
+///
+/// It carries only what the Mac shows. A notification the phone marks
+/// private arrives `redacted`, with no title or text at all, so there is
+/// nothing here to leak even in memory.
+public struct PhoneNotification: Codable, Sendable, Equatable, Identifiable {
+    /// The phone's own key for it, used to dismiss or open it again.
+    public var key: String
+    public var appID: String
+    public var appName: String
+    public var title: String?
+    public var text: String?
+    /// Milliseconds since the Unix epoch, from the phone's clock.
+    public var postedAt: UInt64
+    /// Whether the phone will let it be dismissed from here.
+    public var clearable: Bool
+    /// The phone held back the contents because the app marked them private.
+    public var redacted: Bool
+
+    public var id: String { key }
+
+    public init(key: String, appID: String, appName: String, title: String? = nil, text: String? = nil,
+                postedAt: UInt64, clearable: Bool = true, redacted: Bool = false) {
+        self.key = key
+        self.appID = appID
+        self.appName = appName
+        self.title = title
+        self.text = text
+        self.postedAt = postedAt
+        self.clearable = clearable
+        self.redacted = redacted
+    }
+}
+
 public struct DeviceSnapshot: Codable, Sendable, Equatable {
     public var device: DeviceInfo
     public var battery: BatteryStatus?

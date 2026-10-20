@@ -18,6 +18,7 @@ import AppKit
 import ConduitMedia
 import ConduitProtocol
 import ConduitState
+import CryptoKit
 import Foundation
 import Network
 
@@ -56,6 +57,8 @@ public final class ConduitEngine: ConduitCommands {
     private var lastPhoneInput = Date.distantPast
     private var trackpadIdleCheck: DispatchWorkItem?
     private var lastTrustCheck = Date.distantPast
+    /// The request ID of the notification list this Mac asked the phone for.
+    private var notificationSyncID: String?
 
     private var attached: [String: AttachedTransport] = [:]
     private var known: [String: KnownPhone] = [:]
@@ -72,6 +75,12 @@ public final class ConduitEngine: ConduitCommands {
     /// that resolves into an already-connected phone is not news.
     private var announcedPhones: Set<String> = []
     private var lastClipboardActivity = Date.distantPast
+    private var lastClipboardToPhoneActivity = Date.distantPast
+    private let macClipboard = MacClipboardWatcher()
+    private var phoneClipboard: PhoneClipboardSession?
+    /// A digest of the last text that crossed, either way — so text that
+    /// just arrived is not sent straight back. Never the text itself.
+    private var lastClipboardDigest: Data?
     private var started = false
 
     private enum Key {
@@ -101,6 +110,9 @@ public final class ConduitEngine: ConduitCommands {
         guard !started else { return }
         started = true
         refreshTrackpadPermission()
+        macClipboard.onCopy = { [weak self] text in self?.macCopied(text) }
+        macClipboard.start()
+        refreshClipboardStatus()
 
         guard let adb else {
             store.tools.adb = .missing
@@ -109,6 +121,11 @@ public final class ConduitEngine: ConduitCommands {
             return
         }
         store.tools.adb = .available(path: adb.path)
+
+        let phoneClipboard = PhoneClipboardSession(adb: adb)
+        phoneClipboard.onClipboard = { [weak self] text in self?.deviceClipboardChanged(text) }
+        phoneClipboard.onConnectionChange = { [weak self] in self?.refreshClipboardStatus() }
+        self.phoneClipboard = phoneClipboard
 
         let mirroring = MirroringController(adb: adb, state: store.mirroring)
         mirroring.targets = { [weak self] phoneID in
@@ -195,6 +212,8 @@ public final class ConduitEngine: ConduitCommands {
         }
         guard let id = phoneID ?? store.activePhoneID else { return }
         store.activePhoneID = id
+        // The mirroring session carries the clipboard itself.
+        phoneClipboard?.run(on: nil)
         mirroring.start(phoneID: id)
     }
 
@@ -207,10 +226,19 @@ public final class ConduitEngine: ConduitCommands {
     }
 
     public func sendMacClipboardToPhone() {
-        guard let session = store.mirroring.session, session.control.state == .connected else { return }
-        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
-        session.input.sendClipboard(text, paste: false)
-        store.record(ActivityEvent(kind: .clipboardSynced, title: "Clipboard sent to phone"))
+        // The person's own click: macOS may ask, and that is expected.
+        guard let text = MacClipboardWatcher.readText(asking: true) else {
+            store.record(ActivityEvent(kind: .error, title: "Nothing to send",
+                                       detail: "The clipboard is empty, or a password manager marked it private."))
+            return
+        }
+        refreshClipboardStatus()
+        if sendClipboardToPhone(text) {
+            store.record(ActivityEvent(kind: .clipboardSynced, title: "Clipboard sent to phone"))
+        } else {
+            store.record(ActivityEvent(kind: .error, title: "No way to reach the phone",
+                                       detail: "Link the phone, or connect it over USB or Wi-Fi."))
+        }
     }
 
     public func setPhoneScreen(on: Bool) {
@@ -274,6 +302,7 @@ public final class ConduitEngine: ConduitCommands {
     }
 
     private func mirroringEnded(phoneID: String) {
+        defer { updatePhoneClipboard() }
         touchGuard?.stop(serial: PhoneRegistry.targets(for: phoneID, attached: Array(attached.values)).first?.serial)
         store.mirroring.touchGuard = .off
         store.mirroring.isPhoneScreenOff = false
@@ -369,6 +398,8 @@ public final class ConduitEngine: ConduitCommands {
             store.record(ActivityEvent(kind: .phoneConnected, title: "\(peer.name) is linked to this Mac"))
             linkedNow.insert(peer.id)
             publishLinkedPhones()
+            syncNotifications(with: peer)
+            refreshClipboardStatus()
         }
         server.onEnvelope = { [weak self] envelope, peer in
             self?.linkReceived(envelope, from: peer)
@@ -385,6 +416,11 @@ public final class ConduitEngine: ConduitCommands {
                 store.record(ActivityEvent(kind: .error, title: "Pairing didn't finish", detail: error.message))
             }
             if let peer { linkedNow.remove(peer.id) }
+            // The phone's notifications belong to the phone: when it goes,
+            // what this Mac is showing goes with it.
+            store.removeAllNotifications()
+            store.link.notificationsReady = false
+            refreshClipboardStatus()
             // A phone that vanishes mid-drag must not leave a button held.
             trackpad.releaseEverything()
             store.link.trackpadActive = false
@@ -530,6 +566,8 @@ public final class ConduitEngine: ConduitCommands {
             linkServer?.send(Envelope.success(to: requestID, payload: envelope.payload), to: peer.id)
         case .command(let requestID, let action) where action == .linkSend:
             openLink(envelope, requestID: requestID, from: peer)
+        case .command(let requestID, let action) where action == .clipboardSet:
+            clipboardFromPhone(envelope, requestID: requestID, from: peer)
         case .command(let requestID, let action) where action == .trackpadStart:
             linkServer?.send(trackpadAnswer(to: requestID), to: peer.id)
         case .command(let requestID, let action) where action == .trackpadStop:
@@ -540,15 +578,99 @@ public final class ConduitEngine: ConduitCommands {
             ring(for: peer)
             linkServer?.send(Envelope.success(to: requestID), to: peer.id)
         case .response(let requestID, let outcome):
-            linkAnswered(requestID: requestID, outcome: outcome)
+            linkAnswered(requestID: requestID, outcome: outcome, payload: envelope.payload)
         case .command(let requestID, let action):
             linkServer?.send(Envelope.failure(to: requestID,
                                               ProtocolError(.unsupported, "This version of Conduit for Mac does not do that yet.")),
                              to: peer.id)
             CoreLog.engine.debug("Conduit Link: no handler for \(action.rawValue)")
-        case .event:
-            break
+        case .event(let name, _, _, _):
+            phoneEvent(name, payload: envelope.payload, from: peer)
         }
+    }
+
+    // MARK: - Notifications
+
+    private func phoneEvent(_ name: EventName, payload: [String: JSONValue]?, from peer: LinkPeer) {
+        switch name {
+        case .notificationPosted:
+            guard let payload, let notification = try? JSONValue.object(payload).decoded(as: PhoneNotification.self) else {
+                CoreLog.engine.debug("Conduit Link: a notification arrived that could not be read")
+                return
+            }
+            // What happened, never what it said.
+            CoreLog.engine.notice("the phone sent a notification")
+            // A phone sending notifications has plainly been allowed to,
+            // whatever it said before.
+            store.link.notificationsReady = true
+            store.link.notificationsRefusal = nil
+            store.show(notification)
+        case .notificationRemoved:
+            guard let key = payload?["key"]?.stringValue else { return }
+            CoreLog.engine.notice("the phone took a notification back")
+            store.removeNotification(key: key)
+        default:
+            CoreLog.engine.debug("Conduit Link: no handler for event \(name.rawValue)")
+        }
+    }
+
+    /// Ask the phone what it is already showing, when a link comes up.
+    private func syncNotifications(with peer: LinkPeer) {
+        let command = Envelope.command(.notificationSync)
+        guard case .command(let requestID, _) = command.kind else { return }
+        notificationSyncID = requestID
+        linkServer?.send(command, to: peer.id)
+    }
+
+    private func notificationsSynced(_ outcome: Envelope.Outcome, payload: [String: JSONValue]?) {
+        switch outcome {
+        case .success:
+            store.link.notificationsReady = true
+            store.link.notificationsRefusal = nil
+            guard case .array(let list)? = payload?["notifications"] else { return }
+            CoreLog.engine.notice("the phone is sending notifications; \(list.count) showing")
+            for value in list {
+                guard let notification = try? value.decoded(as: PhoneNotification.self) else { continue }
+                store.show(notification)
+            }
+        case .failure(let error):
+            // The phone says why — usually that Android has not let Conduit
+            // see notifications yet.
+            CoreLog.engine.notice("the phone is not sending notifications: \(error.code.rawValue)")
+            store.link.notificationsReady = false
+            store.link.notificationsRefusal = error.message
+        }
+    }
+
+    public func refreshNotifications() {
+        guard let peer = linkTrust?.peers.values.first(where: { linkedNow.contains($0.id) }) else {
+            store.link.notificationsReady = false
+            store.link.notificationsRefusal = "No phone is linked right now."
+            return
+        }
+        syncNotifications(with: peer)
+    }
+
+    public func dismissNotification(key: String) {
+        CoreLog.engine.notice("asked the phone to dismiss a notification")
+        sendNotificationCommand(.notificationDismiss, key: key)
+        // The phone confirms with notification.removed; taking it off the
+        // list now keeps the Mac from feeling slow.
+        store.removeNotification(key: key)
+    }
+
+    public func openNotification(key: String) {
+        CoreLog.engine.notice("asked the phone to open a notification")
+        sendNotificationCommand(.notificationOpen, key: key)
+    }
+
+    public func clearNotifications() {
+        store.removeAllNotifications()
+    }
+
+    private func sendNotificationCommand(_ action: ActionName, key: String) {
+        guard let peer = linkTrust?.peers.values.first(where: { linkedNow.contains($0.id) }) else { return }
+        linkServer?.send(Envelope.command(action, payload: ["key": .string(key)]), to: peer.id)
     }
 
     // MARK: - The phone as a trackpad
@@ -590,6 +712,11 @@ public final class ConduitEngine: ConduitCommands {
         refreshTrackpadPermission()
         guard store.link.trackpadTrusted else {
             CoreLog.engine.notice("the phone's trackpad opened, but macOS has not allowed Conduit to move the pointer")
+            // Put the macOS question in front of the person now, while they
+            // are reaching for the trackpad, rather than leaving them to
+            // find the setting. macOS shows it once; after that the Trackpad
+            // page and System Settings carry on.
+            TrackpadInput.requestTrust()
             store.record(ActivityEvent(kind: .permissionRequired, title: "The phone's trackpad needs permission",
                                        detail: "Allow Conduit under Privacy & Security → Accessibility"))
             return Envelope.failure(to: requestID, ProtocolError(.permissionDenied,
@@ -699,7 +826,12 @@ public final class ConduitEngine: ConduitCommands {
         }
     }
 
-    private func linkAnswered(requestID: String, outcome: Envelope.Outcome) {
+    private func linkAnswered(requestID: String, outcome: Envelope.Outcome, payload: [String: JSONValue]?) {
+        if requestID == notificationSyncID {
+            notificationSyncID = nil
+            notificationsSynced(outcome, payload: payload)
+            return
+        }
         guard let sent = sentLinks.removeValue(forKey: requestID) else { return }
         switch outcome {
         case .success:
@@ -811,6 +943,7 @@ public final class ConduitEngine: ConduitCommands {
             trackpad.releaseEverything()
             store.link.trackpadActive = false
         }
+        updatePhoneClipboard()
 
         if wirelessChanged, started, adb != nil {
             if preferences.autoConnectWireless {
@@ -921,6 +1054,7 @@ public final class ConduitEngine: ConduitCommands {
     }
 
     private func publishPhones() {
+        defer { updatePhoneClipboard() }
         store.phones = PhoneRegistry.phones(attached: Array(attached.values), known: known,
                                             preferredID: store.preferences.preferredPhoneID,
                                             companionApps: companionApps,
@@ -1007,12 +1141,112 @@ public final class ConduitEngine: ConduitCommands {
 
     // MARK: - Clipboard
 
+    /// Something was copied on this Mac, and macOS lets Conduit read it.
+    private func macCopied(_ text: String) {
+        guard store.preferences.clipboardSync else { return }
+        let digest = Self.digest(text)
+        guard digest != lastClipboardDigest else { return }
+        guard sendClipboardToPhone(text) else { return }
+        // One activity entry per burst of copies, and never the text itself.
+        if Date().timeIntervalSince(lastClipboardToPhoneActivity) > 10 {
+            lastClipboardToPhoneActivity = Date()
+            store.record(ActivityEvent(kind: .clipboardSynced, title: "Clipboard synced to phone"))
+        }
+    }
+
+    /// Over Conduit Link when the phone is linked; over adb when a session
+    /// can carry it. False when nothing reaches the phone.
+    @discardableResult
+    private func sendClipboardToPhone(_ text: String) -> Bool {
+        lastClipboardDigest = Self.digest(text)
+        if let peer = linkTrust?.peers.values.first(where: { linkedNow.contains($0.id) }) {
+            linkServer?.send(Envelope.command(.clipboardSet, payload: ["text": .string(text), "sensitive": .bool(false)]),
+                             to: peer.id)
+            CoreLog.engine.notice("sent this Mac's clipboard to the phone over Conduit Link")
+            return true
+        }
+        if phoneClipboard?.setPhoneClipboard(text) == true {
+            CoreLog.engine.notice("sent this Mac's clipboard to the phone over adb")
+            return true
+        }
+        if let session = store.mirroring.session, session.control.state == .connected {
+            session.input.sendClipboard(text, paste: false)
+            return true
+        }
+        return false
+    }
+
+    /// The phone sent its clipboard over Conduit Link — the person asked it
+    /// to, since Android lets no app read the clipboard by itself.
+    private func clipboardFromPhone(_ envelope: Envelope, requestID: String, from peer: LinkPeer) {
+        guard store.preferences.clipboardSync else {
+            linkServer?.send(Envelope.failure(to: requestID, ProtocolError(
+                .permissionDenied, "This Mac is set not to sync the clipboard.")), to: peer.id)
+            return
+        }
+        guard let text = envelope.payload?["text"]?.stringValue, !text.isEmpty,
+              text.utf8.count <= MacClipboardWatcher.maximumBytes else {
+            linkServer?.send(Envelope.failure(to: requestID, ProtocolError(
+                .invalidRequest, "That clipboard was empty or too large.")), to: peer.id)
+            return
+        }
+        lastClipboardDigest = nil
+        deviceClipboardChanged(text)
+        // A phone marking it sensitive (copied from a password manager)
+        // gets the same courtesy here: clipboard managers skip concealed text.
+        if case .bool(true)? = envelope.payload?["sensitive"] {
+            NSPasteboard.general.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+            macClipboard.noteOwnWrite()
+        }
+        CoreLog.engine.notice("put the phone's clipboard on this Mac")
+        linkServer?.send(Envelope.success(to: requestID), to: peer.id)
+    }
+
+    /// The background clipboard session runs while adb reaches the active
+    /// phone and nothing is mirroring.
+    private func updatePhoneClipboard() {
+        guard let phoneClipboard else { return }
+        let wanted = store.preferences.clipboardSync && !store.mirroring.status.isActive
+        let serial = wanted
+            ? store.activePhoneID.flatMap { PhoneRegistry.targets(for: $0, attached: Array(attached.values)).first?.serial }
+            : nil
+        phoneClipboard.run(on: serial)
+        refreshClipboardStatus()
+    }
+
+    public func requestMacClipboardAccess() {
+        // One read at the person's request: macOS shows its question and,
+        // from then on, lists Conduit where Always Allow can be chosen.
+        _ = MacClipboardWatcher.readText(asking: true)
+        refreshClipboardStatus()
+    }
+
+    public func refreshClipboardStatus() {
+        let access = MacClipboardWatcher.access
+        if store.clipboard.macAccess != access { store.clipboard.macAccess = access }
+        let mirroringClipboard = store.mirroring.session?.control.state == .connected
+        let automatic = phoneClipboard?.isConnected == true || mirroringClipboard
+        if store.clipboard.phoneToMacAutomatic != automatic { store.clipboard.phoneToMacAutomatic = automatic }
+        let reachable = automatic || !linkedNow.isEmpty
+        if store.clipboard.canReachPhone != reachable { store.clipboard.canReachPhone = reachable }
+    }
+
+    private static func digest(_ text: String) -> Data {
+        Data(SHA256.hash(data: Data(text.utf8)))
+    }
+
     private func deviceClipboardChanged(_ text: String) {
         guard store.preferences.clipboardSync, !text.isEmpty else { return }
+        // Text this Mac just sent comes straight back from the phone's own
+        // clipboard listener; it is already here.
+        let digest = Self.digest(text)
+        guard digest != lastClipboardDigest else { return }
+        lastClipboardDigest = digest
 
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        macClipboard.noteOwnWrite()
 
         // One activity entry per burst of copies, and never the text itself.
         if Date().timeIntervalSince(lastClipboardActivity) > 10 {

@@ -231,6 +231,8 @@ Battery      { level: 0–100, charging: Bool }
 Network      { type: "wifi" | "cellular" | "ethernet" | "none" }
 Snapshot     { device: DeviceInfo, battery?: Battery, network?: Network, locked?: Bool,
                features: { <featureID>: <availability> } }
+Notification { key, appID, appName, title?, text?, postedAt, clearable: Bool,
+               redacted: Bool }
 ```
 
 **Feature IDs:** `mirroring`, `remoteInput`, `trackpad`, `clipboard`,
@@ -265,6 +267,11 @@ Snapshot     { device: DeviceInfo, battery?: Battery, network?: Network, locked?
 | `trackpad.start` / `trackpad.stop` | command | both | `{}` |
 | `trackpad.state` | event | phone → Mac | `{ active, foreground }` |
 | `trackpad.config` | event | phone → Mac | `{ sensitivity, naturalScrolling }` |
+| `notification.posted` | event | phone → Mac | `Notification` |
+| `notification.removed` | event | phone → Mac | `{ key }` |
+| `notification.sync` | command | Mac → phone | `{}` → `{ notifications: [Notification] }` |
+| `notification.dismiss` | command | Mac → phone | `{ key }` — dismisses it on the phone |
+| `notification.open` | command | Mac → phone | `{ key }` — the phone opens what it points at |
 | `link.send` | command | both | `{ url, title? }` |
 | `clipboard.set` | command | both | `{ text, sensitive }` |
 | `call.incoming` | event | phone → Mac | `{ callID, number?, name? }` |
@@ -273,6 +280,25 @@ Snapshot     { device: DeviceInfo, battery?: Battery, network?: Network, locked?
 | `call.dial` | command | Mac → phone | `{ number }` |
 | `call.mute` | command | Mac → phone | `{ muted }` — may fail with `unsupported` |
 | `mac.find` | command | phone → Mac | `{}` — the Mac plays a sound until dismissed |
+
+**Notifications.** The phone decides what leaves it. It never sends an
+ongoing notification (media players, foreground services), a group summary,
+one of Conduit's own, or one from an app the person has turned off. A
+notification Android marks secret is not sent at all; one marked private is
+sent as `redacted`, without its title or text, and the Mac says only which
+app it came from. `key` is opaque and means nothing off the phone that made
+it. Neither side writes a notification, or anything in it, to disk or to a
+log.
+
+**Clipboard.** `clipboard.set` carries plain text, at most 256 KiB. The Mac
+sends its clipboard when it changes — once macOS lets Conduit read it
+without asking — and the phone sends only when the person asks, from the
+share sheet or the Quick Settings tile, because Android lets no app read the
+clipboard in the background. Neither side sends text a password manager
+marks concealed, transient or auto-generated; `sensitive` marks text the
+person sent on purpose anyway, so the receiver keeps it out of previews and
+clipboard managers. Neither side writes clipboard text to disk or to a log.
+A receiver set not to sync answers `permission_denied`.
 
 **Links.** `link.send` carries only `http` and `https` URLs, at most 2,048
 characters, with a host. The receiver checks this itself and answers

@@ -28,9 +28,9 @@ and works over any network the two share — including the phone's hotspot.
 | **B · Conduit Link** | The channel: Mac listener and Bonjour advert, phone client and foreground service, identity keys, pairing, sealed frames, heartbeat | A | Done — paired and linked on the phone, over its hotspot |
 | **C · Device state** | Battery, charging and network shown on the Mac from the phone itself, not from adb polling | B | Planned |
 | **D · Links** | Share a link from the phone to the Mac and back, from the share sheet and the menu bar | B | Done — checked both ways on the phone |
-| **E · Find my Mac** | Ring this Mac from the phone | B | Built — check on the phone pending |
+| **E · Find my Mac** | Ring this Mac from the phone | B | Done — rang on the phone's request |
 | **F · Files** | Send a file each way, over the link's file channel | B | Planned |
-| **G · Notifications** | Phone notifications on the Mac, opt-in per app, with dismiss | B | Planned |
+| **G · Notifications** | Phone notifications on the Mac, opt-in per app, with dismiss | B | Built — check pending: Android 16 treats notification access for a sideloaded app as a restricted setting, and it has not been granted yet |
 | **H · Phone as trackpad** | The phone's screen drives the Mac's pointer; needs macOS Accessibility permission | B | Built, not working yet — the Mac had never been granted Accessibility, and no pointer has moved from the phone |
 | **I · Calls** | Incoming call events on the Mac, and answer/decline where Android allows it | B, G | Planned |
 | **J · Camera** | The phone's camera in a Conduit window through scrcpy. Using it in other Mac apps needs a Camera Extension and a paid Apple Developer account | — | Planned |
@@ -78,8 +78,17 @@ These shape the product and are shown in the UI rather than hidden.
   phone, and adb cannot disable an input device. Conduit for Android
   swallows those touches with an accessibility service while the Mac has the
   screen off; it needs Android 13 or later.
-- **Phone → Mac clipboard** works through the mirroring session. Android 10+
-  blocks background clipboard reads for apps.
+- **The clipboard reads are guarded on both sides.** Android lets no app read
+  the clipboard in the background, so the phone's clipboard reaches the Mac
+  by itself only while adb reaches the phone (a scrcpy server, which runs as
+  the adb shell, may read it); otherwise it takes one tap — the share sheet
+  or the Quick Settings tile. macOS asks before an app reads the clipboard
+  by itself, so the Mac sends its clipboard automatically only once the
+  person sets Conduit to Always Allow.
+- **Notification access is a restricted setting** on Android 13 and later
+  for an app that did not come from an app store: the person has to allow
+  restricted settings for Conduit before its notification-access switch
+  works.
 - **Phone as trackpad** needs the Android app on screen; Android delivers
   touches only to the foreground app.
 - **Call audio stays on the phone.** Cellular call audio cannot be routed to

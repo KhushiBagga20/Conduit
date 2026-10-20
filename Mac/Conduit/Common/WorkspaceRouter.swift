@@ -17,7 +17,8 @@ final class WorkspaceRouter {
     static let phoneWindowID = "phone"
 
     enum Section: String, CaseIterable, Identifiable, Hashable {
-        case overview, phoneScreen, trackpad, camera, calls, links, clipboard, activity, devices, settings
+        case overview, phoneScreen, trackpad, camera, calls, links, notifications, clipboard, activity, devices,
+             settings
 
         var id: String { rawValue }
 
@@ -29,6 +30,7 @@ final class WorkspaceRouter {
             case .camera: "Camera"
             case .calls: "Calls"
             case .links: "Link Sharing"
+            case .notifications: "Notifications"
             case .clipboard: "Clipboard"
             case .activity: "Activity"
             case .devices: "Devices"
@@ -44,6 +46,7 @@ final class WorkspaceRouter {
             case .camera: "camera"
             case .calls: "phone"
             case .links: "link"
+            case .notifications: "bell"
             case .clipboard: "doc.on.clipboard"
             case .activity: "clock.arrow.circlepath"
             case .devices: "smartphone"
@@ -59,6 +62,7 @@ final class WorkspaceRouter {
             case .camera: .camera
             case .calls: .calls
             case .links: .links
+            case .notifications: .notifications
             case .clipboard: .clipboard
             default: nil
             }
@@ -73,6 +77,8 @@ final class WorkspaceRouter {
             case .camera: "4"
             case .calls: "5"
             case .links: "6"
+            // ⌘1…⌘9 are taken; Notifications opens from the sidebar.
+            case .notifications: nil
             case .clipboard: "7"
             case .activity: "8"
             case .devices: "9"

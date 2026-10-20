@@ -24,7 +24,24 @@ final class AppModel {
 
     var store: ConduitStore { engine.store }
 
+    /// Posts the phone's notifications as this Mac's own.
+    private lazy var banners = PhoneNotificationBanners { [weak self] in self?.engine }
+
     private init() {}
+
+    /// Keep this Mac's own notifications in step with the phone's: post what
+    /// arrives, and take back what the phone has dismissed.
+    func watchNotifications() {
+        withObservationTracking { [self] in
+            _ = store.notifications
+            _ = store.preferences.notificationBanners
+        } onChange: { [self] in
+            Task { @MainActor in
+                banners.update(with: store.notifications, enabled: store.preferences.notificationBanners)
+                watchNotifications()
+            }
+        }
+    }
 
     /// Put the ringing window on screen whenever a phone goes looking for
     /// this Mac, and take it away when the ringing stops. The window belongs

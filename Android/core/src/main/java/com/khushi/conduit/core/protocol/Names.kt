@@ -22,6 +22,9 @@ object ActionName {
     const val CALL_DIAL = "call.dial"
     const val CALL_MUTE = "call.mute"
     const val MAC_FIND = "mac.find"
+    const val NOTIFICATION_SYNC = "notification.sync"
+    const val NOTIFICATION_DISMISS = "notification.dismiss"
+    const val NOTIFICATION_OPEN = "notification.open"
 }
 
 object EventName {
@@ -31,6 +34,8 @@ object EventName {
     const val DEVICE_NETWORK = "device.network"
     const val DEVICE_LOCK = "device.lock"
     const val FEATURES_CHANGED = "features.changed"
+    const val NOTIFICATION_POSTED = "notification.posted"
+    const val NOTIFICATION_REMOVED = "notification.removed"
     const val TRACKPAD_STATE = "trackpad.state"
     const val TRACKPAD_CONFIG = "trackpad.config"
     const val CALL_INCOMING = "call.incoming"

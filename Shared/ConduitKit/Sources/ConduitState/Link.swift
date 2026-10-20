@@ -105,6 +105,11 @@ public final class LinkState {
     /// True while the phone is actually driving the pointer.
     public package(set) var trackpadActive = false
 
+    /// Whether the phone is sending its notifications, and why not when it
+    /// is not.
+    public package(set) var notificationsReady = false
+    public package(set) var notificationsRefusal: String?
+
     /// Whether a linked phone is connected right now.
     public var hasConnectedPhone: Bool { phones.contains(where: \.isConnected) }
 

@@ -46,10 +46,13 @@ final class ScrcpyServer {
         var options: MirroringOptions
         var videoSource: VideoSource = .display
         var control = true
+        /// A server for the clipboard alone — see `clipboardArguments`.
+        var clipboardOnly = false
 
         /// The server command line, verified against scrcpy v4.1's
         /// Options.java. `scid` is parsed as hex and must fit in 31 bits.
         var arguments: [String] {
+            if clipboardOnly { return clipboardArguments }
             var args = [
                 "scid=\(String(format: "%08x", scid))",
                 "log_level=info",
@@ -74,6 +77,28 @@ final class ScrcpyServer {
                 args += ["video_source=camera", "camera_facing=\(facing.rawValue)"]
             }
             return args
+        }
+
+        /// No video and no audio, so the control socket is the only one; no
+        /// dummy byte or device name on it, so a bare control connection can
+        /// read it. It must never disturb the phone: `power_on=false` leaves
+        /// the screen as it is, and nothing keeps the phone awake. Option
+        /// names checked against the bundled v4.1 server.
+        private var clipboardArguments: [String] {
+            [
+                "scid=\(String(format: "%08x", scid))",
+                "log_level=info",
+                "video=false",
+                "audio=false",
+                "control=true",
+                "tunnel_forward=true",
+                "send_dummy_byte=false",
+                "send_device_meta=false",
+                "clipboard_autosync=true",
+                "power_on=false",
+                "stay_awake=false",
+                "keep_active=false",
+            ]
         }
 
         var socketName: String { "scrcpy_\(String(format: "%08x", scid))" }

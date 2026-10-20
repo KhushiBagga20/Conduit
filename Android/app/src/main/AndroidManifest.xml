@@ -30,6 +30,24 @@
   "Send to Mac" in the share sheet sends the web link in shared text to the
   linked Mac, which opens it; links from the Mac arrive as a notification
   that opens them here. Neither keeps the link, and only its site is shown.
+  Shared text without a link lands on the Mac's clipboard instead.
+
+  The clipboard: what the Mac copies is written here over Conduit Link —
+  Android allows writing the clipboard from the background, never reading
+  it. So this phone's clipboard goes to the Mac only when the person asks:
+  the share sheet, or the "Send clipboard to Mac" Quick Settings tile, which
+  opens an invisible screen for the moment it takes to read once.
+
+  The notification relay is a notification listener: Android hands it this
+  phone's notifications only after the person allows Conduit under
+  notification access, and it can be taken back there at any time. Conduit
+  sends them to the linked Mac and keeps none of them: nothing ongoing, no
+  group summaries and nothing from an app switched off ever leaves, and a
+  notification marked private travels without its contents.
+
+  RECEIVE_BOOT_COMPLETED brings Conduit Link back after the phone restarts
+  (and after Conduit updates), so a paired Mac can reach the phone without
+  the app being opened first. With no paired Mac it does nothing.
 
   VIBRATE is what the trackpad screen feels like: the Mac sends a short buzz
   as each click lands. It is granted at install and reaches nothing else.
@@ -54,6 +72,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- The hotspot switch, opened straight from the request notification. -->
     <queries>
@@ -91,6 +110,25 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".link.SendClipboardActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <service
+            android:name=".link.ClipboardTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_clipboard"
+            android:label="@string/send_clipboard"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <activity
             android:name=".link.ShareToMacActivity"
             android:exported="true"
             android:excludeFromRecents="true"
@@ -122,6 +160,25 @@
             android:name=".link.LinkService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <service
+            android:name=".notifications.NotificationRelay"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".link.LinkStarter"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".link.MacHint"

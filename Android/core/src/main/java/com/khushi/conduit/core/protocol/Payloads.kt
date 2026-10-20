@@ -35,6 +35,27 @@ enum class NetworkType {
 @Serializable
 data class NetworkStatus(val type: NetworkType)
 
+/**
+ * One notification showing on this phone — Shared/Protocol/README.md §6.
+ *
+ * It carries only what the Mac shows. A notification the app marks private
+ * travels [redacted], with no title or text at all, so there is nothing in
+ * it to leak.
+ */
+@Serializable
+data class PhoneNotification(
+    /** This phone's own key for it, used to dismiss or open it again. */
+    val key: String,
+    val appID: String,
+    val appName: String,
+    val title: String? = null,
+    val text: String? = null,
+    /** Milliseconds since the Unix epoch. */
+    val postedAt: Long,
+    val clearable: Boolean = true,
+    val redacted: Boolean = false,
+)
+
 @Serializable
 data class DeviceSnapshot(
     val device: DeviceInfo,

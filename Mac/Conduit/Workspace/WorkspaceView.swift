@@ -41,6 +41,7 @@ struct WorkspaceView: View {
         case .devices: DevicesPage()
         case .settings: SettingsForm().navigationTitle("Settings")
         case .links: LinksPage()
+        case .notifications: NotificationsPage()
         case .trackpad: TrackpadPage()
         case .camera, .calls:
             PlannedFeaturePage(section: section)
@@ -65,6 +66,7 @@ private struct Sidebar: View {
             Section("Continuity") {
                 row(.calls)
                 row(.links)
+                row(.notifications)
                 row(.clipboard)
             }
             Section("Conduit") {

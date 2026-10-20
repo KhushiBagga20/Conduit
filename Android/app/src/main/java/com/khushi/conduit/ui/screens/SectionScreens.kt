@@ -27,8 +27,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.LaptopMac
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Coffee
 import androidx.compose.material.icons.rounded.DeveloperMode
@@ -41,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +65,8 @@ import com.khushi.conduit.link.HotspotBeacon
 import com.khushi.conduit.link.HotspotRequests
 import com.khushi.conduit.TrackpadActivity
 import com.khushi.conduit.link.LinkHub
+import com.khushi.conduit.notifications.NotificationApps
+import com.khushi.conduit.notifications.NotificationRelay
 import com.khushi.conduit.link.LinkService
 import com.khushi.conduit.system.PhoneSetup
 import com.khushi.conduit.system.SystemScreen
@@ -262,10 +267,11 @@ private fun LinkedMacsSection(link: LinkHub.State, actions: MacsActions, hotspot
                 IconBubble(Icons.Rounded.Link)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Send links", color = canvas.content, style = MaterialTheme.typography.titleMedium)
+                    Text("Links and clipboard", color = canvas.content, style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "In any app, tap Share, then Send to Mac, and the link opens on your Mac. Links your Mac " +
-                            "sends arrive here as a notification.",
+                        "In any app, Share → Send to Mac opens a link on your Mac, or puts other text on its " +
+                            "clipboard. What you copy on your Mac lands here by itself. To send this phone's " +
+                            "clipboard, add the Send clipboard to Mac tile to Quick Settings.",
                         color = canvas.contentSecondary,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -513,7 +519,16 @@ fun SettingsScreen() {
     val context = LocalContext.current
     val preferences = LocalAppPreferences.current
     val phone = rememberPhoneSettings()
+    val link by LinkHub.state.collectAsState()
     var askForPermission by remember { mutableStateOf(false) }
+    // Notification access is granted outside the app, and the apps that have
+    // posted change as they post, so both are read again on every return.
+    var notificationsOn by remember { mutableStateOf(NotificationRelay.isListening(context)) }
+    var notificationApps by remember { mutableStateOf(NotificationApps.apps(context)) }
+    LaunchedEffect(link.notificationsOn) {
+        notificationsOn = NotificationRelay.isListening(context)
+        notificationApps = NotificationApps.apps(context)
+    }
     val version = remember {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "—"
     }
@@ -526,6 +541,12 @@ fun SettingsScreen() {
         onWirelessDebugging = { on -> if (!phone.setWirelessDebugging(on)) askForPermission = true },
         onStayAwake = { on -> if (!phone.setStayAwakeWhileCharging(on)) askForPermission = true },
         onOpen = { it.open(context) },
+        notificationsOn = notificationsOn,
+        notificationApps = notificationApps,
+        onAllowApp = { id, allowed ->
+            NotificationApps.setAllowed(context, id, allowed)
+            notificationApps = NotificationApps.apps(context)
+        },
     )
 
     if (askForPermission) {
@@ -548,6 +569,9 @@ fun SettingsContent(
     onWirelessDebugging: (Boolean) -> Unit,
     onStayAwake: (Boolean) -> Unit,
     onOpen: (SystemScreen) -> Unit,
+    notificationsOn: Boolean = false,
+    notificationApps: List<NotificationApps.App> = emptyList(),
+    onAllowApp: (String, Boolean) -> Unit = { _, _ -> },
 ) {
     val canvas = LocalCanvas.current
 
@@ -591,6 +615,51 @@ fun SettingsContent(
             }
             PillButton("Open Developer options", modifier = Modifier.fillMaxWidth()) {
                 onOpen(SystemScreen.DEVELOPER_OPTIONS)
+            }
+        }
+
+        SectionLabel("Notifications")
+        PlainCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+            Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconBubble(Icons.Rounded.Notifications)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Notifications on your Mac", color = canvas.content, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (notificationsOn) {
+                            "Your linked Mac shows what arrives here. Nothing ongoing, and nothing from an app " +
+                                "switched off below, ever leaves this phone."
+                        } else {
+                            "Android has to let Conduit see notifications before your Mac can show them."
+                        },
+                        color = canvas.contentSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            PillButton(
+                if (notificationsOn) "Change notification access" else "Allow notification access",
+                modifier = Modifier.fillMaxWidth(),
+            ) { onOpen(SystemScreen.NOTIFICATION_ACCESS) }
+
+            if (notificationsOn && notificationApps.isNotEmpty()) {
+                CardDivider()
+                Text(
+                    "Apps that have sent one since then",
+                    color = canvas.contentSecondary,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                )
+                notificationApps.forEachIndexed { index, app ->
+                    if (index > 0) CardDivider()
+                    SwitchRow(
+                        icon = Icons.Rounded.Apps,
+                        title = app.name,
+                        supporting = if (app.allowed) "Goes to your Mac" else "Stays on this phone",
+                        checked = app.allowed,
+                        onCheckedChange = { allowed -> onAllowApp(app.id, allowed) },
+                    )
+                }
             }
         }
 

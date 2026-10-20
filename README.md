@@ -12,11 +12,14 @@ connection.
 > phone over USB, Wireless debugging or the phone's own hotspot — verified on
 > a Galaxy S24 Ultra, including carrying on over Wi-Fi when the cable is
 > pulled. Conduit for Android pairs with the Mac over Conduit Link, shares
-> links both ways, and lets the Mac ask for its hotspot over Bluetooth.
-> Ringing the Mac from the phone, and using the phone as a trackpad, are
-> built but not working end to end yet: the trackpad needs macOS
-> Accessibility permission and has not moved a pointer in anger. Files,
-> notifications and calls are planned. See the
+> links both ways, rings the Mac from the phone, and lets the Mac ask for
+> its hotspot over Bluetooth.
+>
+> Built but not yet seen working end to end: phone notifications on the
+> Mac (Android has not yet let a sideloaded Conduit read notifications),
+> the clipboard both ways without mirroring, and the phone as a trackpad
+> (it needs macOS Accessibility permission, and has not moved a pointer in
+> anger). Files and calls are next. See the
 > [roadmap](Documentation/Roadmap.md) and
 > [measurements](Documentation/Measurements.md).
 

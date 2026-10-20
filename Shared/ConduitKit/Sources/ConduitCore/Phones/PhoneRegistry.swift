@@ -149,7 +149,6 @@ enum PhoneRegistry {
             .camera: major.map { $0 >= 12 } == false ? .unsupported : .planned,
             .calls: .planned,
             .files: .planned,
-            .notifications: .planned,
         ]
     }
 }

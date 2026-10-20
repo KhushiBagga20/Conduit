@@ -33,6 +33,8 @@ object LinkHub {
         val pairing: PairingPrompt? = null,
         /** A paired Mac can ask for the hotspot over Bluetooth right now. */
         val hotspotRequestsReady: Boolean = false,
+        /** Android is handing Conduit this phone's notifications. */
+        val notificationsOn: Boolean = false,
     )
 
     private val mutable = MutableStateFlow(State())

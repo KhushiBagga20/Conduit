@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Color
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -74,6 +75,13 @@ class TouchGuardService : AccessibilityService() {
                 override fun onStateChanged(state: Int) = Unit
             })
         }
+        // MEASURED: with explore-by-touch on, the Mac's cursor hovering over
+        // the mirror moves accessibility focus, and Android draws its green
+        // focus box around whatever is under the pointer. Nothing is tapped,
+        // but the box has no business on screen; a width of zero draws none.
+        // It applies only while this service runs.
+        setAccessibilityFocusAppearance(0, Color.TRANSPARENT)
+
         val filter = IntentFilter(Intent.ACTION_SCREEN_OFF).apply { addAction(Intent.ACTION_SCREEN_ON) }
         registerReceiver(powerButton, filter, Context.RECEIVER_NOT_EXPORTED)
         receiverRegistered = true

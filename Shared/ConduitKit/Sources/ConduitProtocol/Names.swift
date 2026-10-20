@@ -32,6 +32,9 @@ public struct ActionName: RawRepresentable, Hashable, Sendable, CustomStringConv
     public static let callDial = ActionName("call.dial")
     public static let callMute = ActionName("call.mute")
     public static let macFind = ActionName("mac.find")
+    public static let notificationSync = ActionName("notification.sync")
+    public static let notificationDismiss = ActionName("notification.dismiss")
+    public static let notificationOpen = ActionName("notification.open")
 }
 
 // MARK: - Events
@@ -48,6 +51,8 @@ public struct EventName: RawRepresentable, Hashable, Sendable, CustomStringConve
     public static let deviceNetwork = EventName("device.network")
     public static let deviceLock = EventName("device.lock")
     public static let featuresChanged = EventName("features.changed")
+    public static let notificationPosted = EventName("notification.posted")
+    public static let notificationRemoved = EventName("notification.removed")
     public static let trackpadState = EventName("trackpad.state")
     public static let trackpadConfig = EventName("trackpad.config")
     public static let callIncoming = EventName("call.incoming")

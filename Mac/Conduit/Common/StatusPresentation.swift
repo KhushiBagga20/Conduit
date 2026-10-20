@@ -17,6 +17,10 @@ extension ConduitStore {
     func availability(_ feature: FeatureID) -> Availability {
         switch feature {
         case .links, .findMac: link.hasConnectedPhone ? .available : .requiresSetup
+        case .notifications:
+            if !link.hasConnectedPhone { .requiresSetup }
+            else if !link.notificationsReady { .requiresPermission }
+            else { .available }
         case .trackpad:
             if link.phones.isEmpty { .requiresSetup }
             else if !link.trackpadTrusted { .requiresPermission }
@@ -139,7 +143,7 @@ extension FeatureID {
         case .calls: "Answer, decline and place calls from this Mac. Call audio stays on the phone."
         case .links: "Send web links between this Mac and the phone over Conduit Link."
         case .files: "Send files between this Mac and the phone."
-        case .notifications: "See the phone's notifications on this Mac."
+        case .notifications: "See the phone's notifications on this Mac, and dismiss them from here."
         case .findMac: "Ring this Mac from the phone, over Conduit Link, when you cannot find it."
         }
     }

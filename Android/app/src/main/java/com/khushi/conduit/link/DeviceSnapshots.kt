@@ -16,6 +16,7 @@ import com.khushi.conduit.core.protocol.FeatureId
 import com.khushi.conduit.core.protocol.NetworkStatus
 import com.khushi.conduit.core.protocol.NetworkType
 import com.khushi.conduit.core.protocol.Platform
+import com.khushi.conduit.notifications.NotificationRelay
 
 /** What this phone tells a linked Mac about itself — spec §6 `Snapshot`. */
 object DeviceSnapshots {
@@ -45,6 +46,9 @@ object DeviceSnapshots {
             FeatureId.REMOTE_INPUT.wire to Availability.AVAILABLE,
             FeatureId.CLIPBOARD.wire to Availability.AVAILABLE,
             FeatureId.AUDIO.wire to Availability.AVAILABLE,
+            // Over the link, once Android lets Conduit see notifications.
+            FeatureId.NOTIFICATIONS.wire to
+                if (NotificationRelay.isListening(context)) Availability.AVAILABLE else Availability.REQUIRES_PERMISSION,
         ),
     )
 

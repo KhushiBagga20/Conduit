@@ -5,12 +5,17 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ClipData
+import android.content.ClipDescription
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
+import android.os.PersistableBundle
 import android.os.Looper
 import android.os.VibrationEffect
 import android.os.VibratorManager
@@ -31,12 +36,16 @@ import com.khushi.conduit.core.protocol.HandshakeIntent
 import com.khushi.conduit.core.protocol.InputEvent
 import com.khushi.conduit.core.protocol.LinkSessionInfo
 import com.khushi.conduit.core.protocol.Outcome
+import com.khushi.conduit.core.protocol.PhoneNotification
 import com.khushi.conduit.core.protocol.ProtocolError
 import com.khushi.conduit.core.protocol.Vibration
+import com.khushi.conduit.notifications.NotificationRelay
 import com.khushi.conduit.system.SystemScreen
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -75,8 +84,11 @@ class LinkService : Service() {
     @Volatile private var statusText = "Looking for your Mac"
 
     private val main = Handler(Looper.getMainLooper())
-    /** A shared link waiting for the Mac to be linked: in memory only, and only briefly. */
-    private val queuedLink = AtomicReference<String?>(null)
+    /**
+     * Something the person asked to send while no Mac was linked yet — a
+     * link or the clipboard. In memory only, and only briefly.
+     */
+    private val queued = AtomicReference<((LinkConnection, String) -> Unit)?>(null)
     /** Commands sent to the Mac and not answered yet, by request ID. */
     private val awaiting = ConcurrentHashMap<String, (Outcome?) -> Unit>()
     private val linkNotifications = AtomicInteger(0)
@@ -128,7 +140,13 @@ class LinkService : Service() {
                     connection?.close()
                 }
             }
-            ACTION_SEND_LINK -> intent.getStringExtra(EXTRA_URL)?.let(::sendOrQueueLink)
+            ACTION_SEND_LINK -> intent.getStringExtra(EXTRA_URL)?.let { url ->
+                sendWhenLinked { link, mac -> sendLink(link, url, mac) }
+            }
+            ACTION_SEND_CLIPBOARD -> intent.getStringExtra(EXTRA_TEXT)?.let { text ->
+                val sensitive = intent.getBooleanExtra(EXTRA_SENSITIVE, false)
+                sendWhenLinked { link, mac -> sendClipboard(link, text, sensitive, mac) }
+            }
         }
 
         discovery.start()
@@ -145,7 +163,7 @@ class LinkService : Service() {
     override fun onDestroy() {
         running = false
         main.removeCallbacksAndMessages(null)
-        queuedLink.set(null)
+        queued.set(null)
         beacon.stop()
         connection?.close()
         stopHeartbeat()
@@ -235,9 +253,9 @@ class LinkService : Service() {
                     startHeartbeat(connection, session.heartbeatSeconds)
                     sendSnapshot(connection)
                     Log.i(TAG, "linked")
-                    queuedLink.getAndSet(null)?.let { link ->
-                        main.removeCallbacks(giveUpOnQueuedLink)
-                        sendLink(connection, link, mac.name)
+                    queued.getAndSet(null)?.let { send ->
+                        main.removeCallbacks(giveUpOnQueued)
+                        send(connection, mac.name)
                     }
                 }
 
@@ -275,6 +293,27 @@ class LinkService : Service() {
                 ActionName.SESSION_PING -> connection.send(Envelope(EnvelopeKind.Response(kind.requestId, Outcome.Success), envelope.payload))
                 ActionName.STATE_SYNC -> sendSnapshot(connection)
                 ActionName.LINK_SEND -> linkFromMac(connection, kind.requestId, envelope)
+                ActionName.CLIPBOARD_SET -> clipboardFromMac(connection, kind.requestId, envelope)
+                ActionName.NOTIFICATION_SYNC -> connection.send(
+                    if (NotificationRelay.isListening(this)) {
+                        Envelope(
+                            EnvelopeKind.Response(kind.requestId, Outcome.Success),
+                            buildJsonObject {
+                                put("notifications", Json.encodeToJsonElement(
+                                    ListSerializer(PhoneNotification.serializer()), NotificationRelay.showing()))
+                            },
+                        )
+                    } else {
+                        Envelope(EnvelopeKind.Response(kind.requestId, Outcome.Failure(ProtocolError(
+                            ErrorCode.REQUIRES_SETUP,
+                            "Conduit isn't allowed to see this phone's notifications. On the phone: Conduit → " +
+                                "Settings → Notifications → Allow notification access.",
+                        ))))
+                    },
+                )
+                ActionName.NOTIFICATION_DISMISS -> notificationAction(connection, kind.requestId, envelope, open = false)
+                    .also { Log.i(TAG, "the Mac dismissed a notification") }
+                ActionName.NOTIFICATION_OPEN -> notificationAction(connection, kind.requestId, envelope, open = true)
                 else -> connection.send(Envelope(EnvelopeKind.Response(kind.requestId, Outcome.Failure(
                     ProtocolError(ErrorCode.UNSUPPORTED, "This version of Conduit for Android does not do that yet."),
                 ))))
@@ -293,6 +332,34 @@ class LinkService : Service() {
         awaiting[requestId] = answered
         connection.send(Envelope(EnvelopeKind.Command(requestId, action), payload))
         main.postDelayed({ awaiting.remove(requestId)?.invoke(null) }, ANSWER_MILLIS)
+    }
+
+    // Notifications
+
+    /**
+     * The Mac dismissed a notification, or asked the phone to open what it
+     * points at. Android may still refuse to bring an app forward from the
+     * background, so success here means the phone tried.
+     */
+    private fun notificationAction(connection: LinkConnection, requestId: String, envelope: Envelope, open: Boolean) {
+        val key = (envelope.payload?.get("key") as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val outcome = when {
+            key == null -> Outcome.Failure(ProtocolError(ErrorCode.INVALID_REQUEST, "That needs a notification key."))
+            !NotificationRelay.isListening(this) -> Outcome.Failure(ProtocolError(ErrorCode.REQUIRES_SETUP,
+                "Conduit isn't allowed to see notifications on the phone."))
+            open && !NotificationRelay.open(key) -> Outcome.Failure(ProtocolError(ErrorCode.DEVICE_UNAVAILABLE,
+                "The phone couldn't open that notification."))
+            !open && !NotificationRelay.dismiss(key) -> Outcome.Failure(ProtocolError(ErrorCode.DEVICE_UNAVAILABLE,
+                "That notification is already gone."))
+            else -> Outcome.Success
+        }
+        connection.send(Envelope(EnvelopeKind.Response(requestId, outcome)))
+    }
+
+    private fun event(name: String, payload: JsonObject) {
+        val connection = connection ?: return
+        connection.send(Envelope(
+            EnvelopeKind.Event(name, epoch, seq.incrementAndGet(), System.currentTimeMillis()), payload))
     }
 
     // The trackpad
@@ -393,22 +460,61 @@ class LinkService : Service() {
     }
 
     /** Send now if the Mac is linked; otherwise wait a little for the link to come up. */
-    private fun sendOrQueueLink(url: String) {
+    private fun sendWhenLinked(send: (LinkConnection, String) -> Unit) {
         val link = connection
         val mac = connectedMacName()
         if (link != null && mac != null) {
-            sendLink(link, url, mac)
+            send(link, mac)
             return
         }
-        queuedLink.set(url)
-        main.removeCallbacks(giveUpOnQueuedLink)
-        main.postDelayed(giveUpOnQueuedLink, LINK_WAIT_MILLIS)
+        queued.set(send)
+        main.removeCallbacks(giveUpOnQueued)
+        main.postDelayed(giveUpOnQueued, LINK_WAIT_MILLIS)
         toast("Waiting for your Mac…")
         wakeUp()
     }
 
-    private val giveUpOnQueuedLink = Runnable {
-        if (queuedLink.getAndSet(null) != null) toast("Couldn't reach your Mac, so the link wasn't sent.")
+    private val giveUpOnQueued = Runnable {
+        if (queued.getAndSet(null) != null) toast("Couldn't reach your Mac, so nothing was sent.")
+    }
+
+    // Clipboard
+
+    /**
+     * The Mac copied something. Writing the clipboard from the background is
+     * allowed — only reading it is not. Nothing is kept or logged.
+     */
+    private fun clipboardFromMac(connection: LinkConnection, requestId: String, envelope: Envelope) {
+        val text = (envelope.payload?.get("text") as? JsonPrimitive)?.takeIf { it.isString }?.content
+        if (text.isNullOrEmpty() || text.length > MAX_CLIPBOARD_CHARS) {
+            connection.send(Envelope(EnvelopeKind.Response(requestId, Outcome.Failure(
+                ProtocolError(ErrorCode.INVALID_REQUEST, "That clipboard was empty or too large.")))))
+            return
+        }
+        val sensitive = (envelope.payload?.get("sensitive") as? JsonPrimitive)?.booleanOrNull == true
+        main.post {
+            val clip = ClipData.newPlainText("From your Mac", text)
+            if (sensitive && Build.VERSION.SDK_INT >= 33) {
+                clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
+            }
+            runCatching { getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip) }
+        }
+        Log.i(TAG, "put the Mac's clipboard on this phone")
+        connection.send(Envelope(EnvelopeKind.Response(requestId, Outcome.Success)))
+    }
+
+    private fun sendClipboard(connection: LinkConnection, text: String, sensitive: Boolean, macName: String) {
+        Log.i(TAG, "sent this phone's clipboard to the Mac")
+        ask(connection, ActionName.CLIPBOARD_SET, buildJsonObject {
+            put("text", text)
+            put("sensitive", sensitive)
+        }) { outcome ->
+            when (outcome) {
+                null -> toast("$macName didn't answer.")
+                Outcome.Success -> toast("Copied to $macName")
+                is Outcome.Failure -> toast("$macName didn't take it. ${outcome.error.message}")
+            }
+        }
     }
 
     private fun sendLink(connection: LinkConnection, url: String, macName: String) {
@@ -550,6 +656,11 @@ class LinkService : Service() {
         private const val ACTION_PAIR = "com.khushi.conduit.link.PAIR"
         private const val ACTION_STOP = "com.khushi.conduit.link.STOP"
         private const val ACTION_SEND_LINK = "com.khushi.conduit.link.SEND_LINK"
+        private const val ACTION_SEND_CLIPBOARD = "com.khushi.conduit.link.SEND_CLIPBOARD"
+        private const val EXTRA_TEXT = "text"
+        private const val EXTRA_SENSITIVE = "sensitive"
+        /** The Mac's limit is 256 KiB; characters are at least one byte each. */
+        private const val MAX_CLIPBOARD_CHARS = 256 * 1024
         private const val EXTRA_ID = "id"
         private const val EXTRA_NAME = "name"
         private const val EXTRA_HOSTS = "hosts"
@@ -596,10 +707,37 @@ class LinkService : Service() {
             instance?.connection?.send(event)
         }
 
+        /** A notification arrived on the phone and may go to the Mac. */
+        fun notificationPosted(notification: PhoneNotification) {
+            val service = instance ?: return
+            if (service.connection == null) return
+            // What happened, never what it said.
+            Log.i(TAG, "sent a notification to the Mac")
+            service.event(EventName.NOTIFICATION_POSTED,
+                Json.encodeToJsonElement(PhoneNotification.serializer(), notification).jsonObject)
+        }
+
+        /** It is gone from the phone, however it went. */
+        fun notificationRemoved(key: String) {
+            instance?.event(EventName.NOTIFICATION_REMOVED, buildJsonObject { put("key", key) })
+        }
+
+        /** Notification access came or went: the Mac's feature list should say so. */
+        fun refreshFeatures() {
+            val service = instance ?: return
+            service.connection?.let(service::sendSnapshot)
+        }
+
         /** Ring the linked Mac, for finding it. */
         fun ring(context: Context) {
             instance?.ringMac()
                 ?: Toast.makeText(context, "Not linked to your Mac right now.", Toast.LENGTH_SHORT).show()
+        }
+
+        /** Put text on the linked Mac's clipboard, starting the link first if it is not running. */
+        fun sendClipboard(context: Context, text: String, sensitive: Boolean) {
+            context.startForegroundService(Intent(context, LinkService::class.java)
+                .setAction(ACTION_SEND_CLIPBOARD).putExtra(EXTRA_TEXT, text).putExtra(EXTRA_SENSITIVE, sensitive))
         }
 
         /** Send a web link to the linked Mac, which opens it, starting the link first if it is not running. */

@@ -62,6 +62,25 @@ public protocol ConduitCommands: AnyObject {
     /// Stop the sound a phone started when it went looking for this Mac.
     func stopRinging()
 
+    /// Dismiss a notification on the phone, as swiping it away would.
+    func dismissNotification(key: String)
+
+    /// Ask the phone to open what a notification points at.
+    func openNotification(key: String)
+
+    /// Forget what this Mac is showing, leaving the phone's own alone.
+    func clearNotifications()
+
+    /// Ask the phone again for what it is showing.
+    func refreshNotifications()
+
+    /// Read the clipboard once at the person's request, which makes macOS
+    /// list Conduit where Always Allow can be chosen.
+    func requestMacClipboardAccess()
+
+    /// Look again at what macOS allows and which ways the clipboard can flow.
+    func refreshClipboardStatus()
+
     /// Ask macOS for the Accessibility permission the phone's trackpad needs.
     func requestTrackpadPermission()
 
@@ -99,6 +118,8 @@ public nonisolated struct Preferences: Codable, Sendable, Equatable {
     public var naturalScrolling = true
     /// The phone buzzes when a click lands on the Mac.
     public var trackpadHaptics = true
+    /// Show a phone notification on this Mac as it arrives.
+    public var notificationBanners = true
 
     public init() {}
 
@@ -117,6 +138,7 @@ public nonisolated struct Preferences: Codable, Sendable, Equatable {
         trackpadSensitivity = try saved.decodeIfPresent(Double.self, forKey: .trackpadSensitivity) ?? 1.6
         naturalScrolling = try saved.decodeIfPresent(Bool.self, forKey: .naturalScrolling) ?? true
         trackpadHaptics = try saved.decodeIfPresent(Bool.self, forKey: .trackpadHaptics) ?? true
+        notificationBanners = try saved.decodeIfPresent(Bool.self, forKey: .notificationBanners) ?? true
     }
 }
 
@@ -139,7 +161,11 @@ public final class ConduitStore {
     public package(set) var activePhoneID: String?
     public let mirroring = MirroringState()
     public let link = LinkState()
+    public let clipboard = ClipboardState()
     public package(set) var activity: [ActivityEvent] = []
+    /// What is showing on the linked phone, newest first. In memory only:
+    /// Conduit never writes a notification down.
+    public package(set) var notifications: [PhoneNotification] = []
     public package(set) var tools = ToolStatus()
     public package(set) var preferences = Preferences()
 
@@ -166,5 +192,24 @@ public final class ConduitStore {
         }
     }
 
+    /// The phone posted one, or sent what it is already showing.
+    package func show(_ notification: PhoneNotification) {
+        notifications.removeAll { $0.key == notification.key }
+        notifications.insert(notification, at: 0)
+        if notifications.count > Self.notificationLimit {
+            notifications.removeLast(notifications.count - Self.notificationLimit)
+        }
+        notifications.sort { $0.postedAt > $1.postedAt }
+    }
+
+    package func removeNotification(key: String) {
+        notifications.removeAll { $0.key == key }
+    }
+
+    package func removeAllNotifications() {
+        notifications.removeAll()
+    }
+
     static let activityLimit = 200
+    static let notificationLimit = 100
 }
