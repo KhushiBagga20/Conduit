@@ -90,6 +90,10 @@ public protocol ConduitCommands: AnyObject {
     func createPhoneFolder(named name: String)
     /// Open a copy of a phone file in its Mac app.
     func openPhoneFile(_ file: PhoneFile)
+    /// Open a phone file in its Mac app; saving there writes it back.
+    func editPhoneFile(_ file: PhoneFile)
+    /// Stop writing a file's saves back to the phone.
+    func stopEditing(id: UUID)
     func cancelTransfer(id: UUID)
     func clearFinishedTransfers()
 

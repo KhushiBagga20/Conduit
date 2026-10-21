@@ -9,6 +9,11 @@
 //  Transfers run one at a time, each can be cancelled, and nothing is ever
 //  overwritten: a name already taken gets " 2", as Finder does.
 //
+//  Editing in place is the one exception, by request: a file opened for
+//  editing is written back over itself each time it is saved on the Mac —
+//  unless the phone's own copy changed meanwhile, in which case the save
+//  goes beside it, so neither change is lost.
+//
 
 import AppKit
 import ConduitMedia
@@ -36,11 +41,40 @@ final class PhoneFiles {
         let work: Work
         let cancel = CancelFlag()
         var openWhenDone = false
+        /// Runs on the main actor once the job has finished, either way.
+        var onFinish: ((Result<URL?, Error>) -> Void)?
+    }
+
+    /// One file being edited on this Mac: how its working copy and the
+    /// phone's copy last looked, to notice a save and to notice a conflict.
+    private struct Watch {
+        var modified: Date
+        var size: Int
+        /// Set when the working copy changes; a save follows once it holds
+        /// still, because apps write a document in more than one step.
+        var changedAt: Date?
+        var phoneModified: Int64
+        var phoneSize: UInt64
+        var saving = false
+        var saveAgain = false
+    }
+
+    private var watches: [UUID: Watch] = [:]
+    private var watcher: Timer?
+
+    /// Opens a file in its Mac app. Tests put something quieter here.
+    var openInApp: (URL) -> Void = { NSWorkspace.shared.open($0) }
+
+    /// Where working copies live. Old ones are cleared out at launch.
+    nonisolated static var editingFolder: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("com.khushi.Conduit/Editing", isDirectory: true)
     }
 
     init(adb: ADB, state: FilesState) {
         self.adb = adb
         self.state = state
+        Self.clearOldWorkingCopies()
     }
 
     // MARK: - Which phone
@@ -236,6 +270,164 @@ final class PhoneFiles {
         state.transfers.removeAll(where: \.isFinished)
     }
 
+    // MARK: - Editing in place
+
+    func edit(_ file: PhoneFile) {
+        guard !file.isFolder else { return }
+        let session = EditSession(name: file.name, phonePath: file.path)
+        state.editing.append(session)
+        let folder = Self.editingFolder.appendingPathComponent(session.id.uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let transferID = UUID()
+        state.transfers.append(FileTransfer(id: transferID, name: file.name, direction: .toMac, bytesTotal: file.size))
+        let phone = Box<ADBSync.Entry?>(nil)
+        var job = Job(id: transferID, direction: .toMac) { connection, cancel, _, moved in
+            // The phone's copy as it was when opened: a later save checks
+            // against it before writing.
+            phone.value = try connection.stat(file.path)
+            let copy = folder.appendingPathComponent(file.name)
+            try connection.pull(file.path, to: copy) { moved($0); return !cancel.isCancelled }
+            return copy
+        }
+        job.onFinish = { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let copy?):
+                opened(session.id, copy: copy, phone: phone.value)
+            case .success(nil):
+                state.updateEditing(session.id) { $0.status = .failed("The file didn't arrive.") }
+            case .failure(let error):
+                state.updateEditing(session.id) { $0.status = .failed(error.localizedDescription) }
+            }
+        }
+        queue.append(job)
+        startNext()
+    }
+
+    func stopEditing(_ id: UUID) {
+        watches[id] = nil
+        state.editing.removeAll { $0.id == id }
+        if watches.isEmpty {
+            watcher?.invalidate()
+            watcher = nil
+        }
+    }
+
+    private func opened(_ id: UUID, copy: URL, phone: ADBSync.Entry?) {
+        let values = try? copy.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        watches[id] = Watch(modified: values?.contentModificationDate ?? .distantPast, size: values?.fileSize ?? 0,
+                            phoneModified: phone?.modified ?? 0, phoneSize: phone?.size ?? 0)
+        state.updateEditing(id) {
+            $0.status = .editing
+            $0.workingCopy = copy
+        }
+        openInApp(copy)
+        if watcher == nil {
+            watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.checkForSaves() }
+            }
+        }
+    }
+
+    /// Looks at every working copy once a second. Comparing the date and
+    /// size of the file at its path catches every way apps save — writing
+    /// in place, or writing a new file and swapping it in.
+    func checkForSaves() {
+        for (id, var watch) in watches {
+            guard let copy = state.editing.first(where: { $0.id == id })?.workingCopy,
+                  let values = try? copy.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+                  let modified = values.contentModificationDate
+            else { continue } // Mid-swap, the file can be missing for a moment.
+
+            let size = values.fileSize ?? 0
+            if modified != watch.modified || size != watch.size {
+                watch.modified = modified
+                watch.size = size
+                watch.changedAt = Date()
+            } else if let changedAt = watch.changedAt, Date().timeIntervalSince(changedAt) >= 1 {
+                watch.changedAt = nil
+                if watch.saving {
+                    watch.saveAgain = true
+                } else {
+                    watch.saving = true
+                    save(id, copy: copy, expecting: watch)
+                }
+            }
+            watches[id] = watch
+        }
+    }
+
+    private func save(_ id: UUID, copy: URL, expecting watch: Watch) {
+        guard let session = state.editing.first(where: { $0.id == id }) else { return }
+        state.updateEditing(id) { $0.status = .saving }
+
+        let path = session.phonePath
+        let outcome = Box<(path: String, beside: Bool, phone: ADBSync.Entry?)?>(nil)
+        let transferID = UUID()
+        state.transfers.append(FileTransfer(id: transferID, name: session.name, direction: .toPhone,
+                                            bytesTotal: UInt64(max(watch.size, 0))))
+        var job = Job(id: transferID, direction: .toPhone) { connection, cancel, _, moved in
+            var target = path
+            var beside = false
+            if let current = try connection.stat(path),
+               current.modified != watch.phoneModified || current.size != watch.phoneSize {
+                // Someone changed the phone's copy since it was opened here:
+                // keep theirs, and put this one beside it.
+                target = try Self.unused(Self.besideName(for: path), connection)
+                beside = true
+            }
+            try connection.push(copy, to: target) { moved($0); return !cancel.isCancelled }
+            outcome.value = (target, beside, try connection.stat(target))
+            return nil
+        }
+        job.onFinish = { [weak self] result in
+            guard let self, var watch = watches[id] else { return }
+            watch.saving = false
+            switch result {
+            case .success:
+                if let saved = outcome.value {
+                    watch.phoneModified = saved.phone?.modified ?? watch.phoneModified
+                    watch.phoneSize = saved.phone?.size ?? watch.phoneSize
+                    state.updateEditing(id) {
+                        $0.phonePath = saved.path
+                        $0.status = saved.beside ? .savedBeside((saved.path as NSString).lastPathComponent) : .saved(Date())
+                    }
+                }
+            case .failure(let error):
+                state.updateEditing(id) { $0.status = .failed(error.localizedDescription) }
+            }
+            let again = watch.saveAgain
+            watch.saveAgain = false
+            watches[id] = watch
+            if again { watches[id]?.changedAt = Date.distantPast }
+        }
+        queue.append(job)
+        startNext()
+    }
+
+    /// "Report.docx" becomes "Report (edited on Mac).docx".
+    nonisolated static func besideName(for path: String) -> String {
+        let folder = (path as NSString).deletingLastPathComponent
+        let name = (path as NSString).lastPathComponent
+        let stem = (name as NSString).deletingPathExtension
+        let ext = (name as NSString).pathExtension
+        return "\(folder)/\(stem) (edited on Mac)\(ext.isEmpty ? "" : ".\(ext)")"
+    }
+
+    /// Working copies from sessions more than a week old. A copy may still
+    /// be open in some app, so they are not removed when editing stops.
+    nonisolated private static func clearOldWorkingCopies() {
+        let manager = FileManager.default
+        guard let folders = try? manager.contentsOfDirectory(at: editingFolder, includingPropertiesForKeys: [.contentModificationDateKey])
+        else { return }
+        let weekAgo = Date().addingTimeInterval(-7 * 24 * 3600)
+        for folder in folders {
+            let modified = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let modified, modified < weekAgo { try? manager.removeItem(at: folder) }
+        }
+    }
+
     // MARK: - The queue
 
     private func startNext() {
@@ -283,8 +475,9 @@ final class PhoneFiles {
             }
         }
         if job.openWhenDone, case .success(let url?) = result {
-            NSWorkspace.shared.open(url)
+            openInApp(url)
         }
+        job.onFinish?(result)
         if job.direction == .toPhone { refresh() }
         startNext()
     }
@@ -363,6 +556,21 @@ final class PhoneFiles {
             if try connection.stat(candidate) == nil { return candidate }
         }
         return "\(folder)/\(stem) \(UUID().uuidString)\(suffix)"
+    }
+}
+
+/// A value handed out of a background job.
+nonisolated final class Box<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+
+    init(_ value: Value) {
+        stored = value
+    }
+
+    var value: Value {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
     }
 }
 

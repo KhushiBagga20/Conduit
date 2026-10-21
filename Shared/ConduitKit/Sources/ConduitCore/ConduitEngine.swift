@@ -1168,6 +1168,8 @@ public final class ConduitEngine: ConduitCommands {
     public func deletePhoneFiles(_ files: [PhoneFile]) { phoneFiles?.delete(files) }
     public func createPhoneFolder(named name: String) { phoneFiles?.createFolder(named: name) }
     public func openPhoneFile(_ file: PhoneFile) { phoneFiles?.openCopy(file) }
+    public func editPhoneFile(_ file: PhoneFile) { phoneFiles?.edit(file) }
+    public func stopEditing(id: UUID) { phoneFiles?.stopEditing(id) }
     public func cancelTransfer(id: UUID) { phoneFiles?.cancel(id) }
     public func clearFinishedTransfers() { phoneFiles?.clearFinished() }
 

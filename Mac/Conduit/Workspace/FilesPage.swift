@@ -4,8 +4,9 @@
 //
 //  The phone's files, the way Finder shows a disk: a folder at a time,
 //  folders first. Drop files from Finder to send them to the phone; select
-//  and Download to bring them here. Over adb — USB, Wi-Fi debugging or the
-//  phone's hotspot. Nothing on this Mac or the phone is ever overwritten.
+//  and Download to bring them here; double-click a file to edit it in its
+//  Mac app, with each save written back to the phone. Over adb — USB, Wi-Fi
+//  debugging or the phone's hotspot. Nothing else is ever overwritten.
 //
 
 import AppKit
@@ -38,6 +39,10 @@ struct FilesPage: View {
             if store.files.isAvailable {
                 VStack(spacing: 0) {
                     table
+                    if !store.files.editing.isEmpty {
+                        Divider()
+                        EditingStrip()
+                    }
                     if !store.files.transfers.isEmpty {
                         Divider()
                         TransfersStrip()
@@ -100,7 +105,10 @@ struct FilesPage: View {
         .contextMenu(forSelectionType: PhoneFile.ID.self) { ids in
             let files = store.files.entries.filter { ids.contains($0.id) }
             if files.count == 1, let file = files.first {
-                Button(file.isFolder ? "Open" : "Open a Copy") { open(file) }
+                Button("Open") { open(file) }
+                if !file.isFolder {
+                    Button("Open a Copy") { store.commands?.openPhoneFile(file) }
+                }
             }
             if !files.isEmpty {
                 Button("Download") { download(files) }
@@ -195,12 +203,13 @@ struct FilesPage: View {
         return files.count == 1 ? "Delete “\(files[0].name)” from the phone?" : "Delete \(files.count) items from the phone?"
     }
 
+    /// A folder opens here; a file opens in its Mac app for editing.
     private func open(_ file: PhoneFile) {
         if file.isFolder {
             selection.removeAll()
             store.commands?.openPhoneFolder(file.path)
         } else {
-            store.commands?.openPhoneFile(file)
+            store.commands?.editPhoneFile(file)
         }
     }
 
@@ -240,6 +249,59 @@ struct FilesPage: View {
         if type.conforms(to: .archive) { return "doc.zipper" }
         if type.conforms(to: .text) { return "doc.text" }
         return "doc"
+    }
+}
+
+/// Files open in Mac apps, whose saves go back to the phone.
+private struct EditingStrip: View {
+    @Environment(ConduitStore.self) private var store
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Editing").font(.headline)
+            ForEach(store.files.editing) { session in
+                HStack(spacing: 10) {
+                    Image(systemName: "pencil.circle")
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(session.name).lineLimit(1).truncationMode(.middle)
+                        Text(Self.describe(session.status))
+                            .font(.caption)
+                            .foregroundStyle(Self.isProblem(session.status) ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 8)
+                    if let copy = session.workingCopy {
+                        Button("Show Copy") { NSWorkspace.shared.activateFileViewerSelecting([copy]) }
+                            .buttonStyle(.link)
+                    }
+                    Button("Done") { store.commands?.stopEditing(id: session.id) }
+                        .help("Stop sending this file's saves to the phone")
+                }
+                .font(.callout)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.bar)
+    }
+
+    private static func describe(_ status: EditSession.Status) -> String {
+        switch status {
+        case .opening: "Opening…"
+        case .editing: "Each save goes back to the phone."
+        case .saving: "Saving to the phone…"
+        case .saved(let date): "Saved to the phone at \(date.formatted(date: .omitted, time: .shortened))."
+        case .savedBeside(let name): "The phone's copy changed meanwhile, so this save went beside it, as “\(name)”."
+        case .failed(let message): message
+        }
+    }
+
+    private static func isProblem(_ status: EditSession.Status) -> Bool {
+        switch status {
+        case .savedBeside, .failed: true
+        default: false
+        }
     }
 }
 

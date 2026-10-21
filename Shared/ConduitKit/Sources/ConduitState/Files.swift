@@ -61,6 +61,37 @@ public nonisolated struct FileTransfer: Identifiable, Sendable, Equatable {
     }
 }
 
+/// A phone file open in a Mac app. Saving it there writes it back to the
+/// phone.
+public nonisolated struct EditSession: Identifiable, Sendable, Equatable {
+    public enum Status: Sendable, Equatable {
+        case opening
+        case editing
+        case saving
+        case saved(Date)
+        /// The phone's own copy changed after it was opened here, so this
+        /// save went beside it under another name rather than over it.
+        case savedBeside(String)
+        case failed(String)
+    }
+
+    public let id: UUID
+    public let name: String
+    /// Where saves go on the phone. It moves to the copy beside the
+    /// original after a conflict, so later saves keep going there.
+    public package(set) var phonePath: String
+    public package(set) var status: Status
+    /// The copy on this Mac that the app has open.
+    public package(set) var workingCopy: URL?
+
+    package init(id: UUID = UUID(), name: String, phonePath: String) {
+        self.id = id
+        self.name = name
+        self.phonePath = phonePath
+        self.status = .opening
+    }
+}
+
 @Observable
 public final class FilesState {
 
@@ -75,11 +106,17 @@ public final class FilesState {
     public package(set) var isLoading = false
     public package(set) var error: String?
     public package(set) var transfers: [FileTransfer] = []
+    public package(set) var editing: [EditSession] = []
 
     package init() {}
 
     package func update(_ id: UUID, _ change: (inout FileTransfer) -> Void) {
         guard let index = transfers.firstIndex(where: { $0.id == id }) else { return }
         change(&transfers[index])
+    }
+
+    package func updateEditing(_ id: UUID, _ change: (inout EditSession) -> Void) {
+        guard let index = editing.firstIndex(where: { $0.id == id }) else { return }
+        change(&editing[index])
     }
 }
