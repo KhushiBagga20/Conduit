@@ -29,6 +29,7 @@ final class LinkConnection {
     var onReady: (LinkPeer) -> Void = { _ in }
     var onEnvelope: (Envelope, LinkPeer) -> Void = { _, _ in }
     var onInput: (InputEvent, LinkPeer) -> Void = { _, _ in }
+    var onFile: (FileChunk, LinkPeer) -> Void = { _, _ in }
     var onClosed: (LinkPeer?, ProtocolError?) -> Void = { _, _ in }
 
     /// The phone on the other end, once the handshake has proved it.
@@ -158,9 +159,20 @@ final class LinkConnection {
             }
             onInput(event, peer)
 
+        case (.file, _):
+            guard let peer else {
+                finish(ProtocolError(.notPaired, "The phone sent a file before the handshake finished."))
+                return
+            }
+            guard let chunk = FileChunk(frame: Frame(channel: frame.channel, type: frame.type, payload: payload)) else {
+                finish(ProtocolError(.invalidRequest, "The phone sent part of a file Conduit could not read."))
+                return
+            }
+            onFile(chunk, peer)
+
         default:
-            // Channels for files and media arrive with their features; until
-            // then, silence is better than a guess.
+            // Channels for media arrive with their features; until then,
+            // silence is better than a guess.
             CoreLog.engine.debug("ignoring a Conduit Link frame on channel \(frame.channel.rawValue)")
         }
     }

@@ -312,3 +312,113 @@ struct PreferencesTests {
         #expect(roundTrip == preferences)
     }
 }
+
+@Suite("Wireless readiness")
+struct WirelessProbeTests {
+
+    @Test("reads the switch, the port and the Wi-Fi address, ignoring the hotspot and mobile data")
+    func probe() {
+        let output = """
+        wd=1
+        port=37451
+        1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever preferred_lft forever
+        12: rmnet_data0    inet 10.71.4.20/30 scope global rmnet_data0\\       valid_lft forever preferred_lft forever
+        31: swlan0    inet 10.129.224.104/24 brd 10.129.224.255 scope global swlan0\\       valid_lft forever
+        30: wlan0    inet 192.168.31.5/24 brd 192.168.31.255 scope global wlan0\\       valid_lft forever preferred_lft forever
+        """
+        #expect(ADBParsing.wirelessProbe(output) ==
+                ADBParsing.WirelessProbe(debuggingOn: true, port: 37451, wifiAddress: "192.168.31.5"))
+    }
+
+    @Test("Android 16 leaves the port property empty; adbd's listening socket gives it")
+    func portFromSockets() {
+        let output = """
+        wd=1
+        port=
+        44: wlan0    inet 10.0.88.40/22 brd 10.0.91.255 scope global dynamic wlan0
+        listen=000000000000000000000000000000:15B3
+        listen=00000000000000000000000000000000:B559
+        """
+        #expect(ADBParsing.wirelessProbe(output) ==
+                ADBParsing.WirelessProbe(debuggingOn: true, port: 46425, wifiAddress: "10.0.88.40"))
+        // Switched off: a listener is not Wireless debugging's.
+        #expect(ADBParsing.wirelessProbe("wd=0\nport=\nlisten=00000000000000000000000000000000:B559").port == nil)
+    }
+
+    @Test("off, and not on Wi-Fi")
+    func off() {
+        #expect(ADBParsing.wirelessProbe("wd=0\nport=\n12: rmnet_data0    inet 10.71.4.20/30 scope global rmnet_data0") ==
+                ADBParsing.WirelessProbe(debuggingOn: false, port: nil, wifiAddress: nil))
+        #expect(ADBParsing.wirelessProbe("wd=null\nport=0\n") ==
+                ADBParsing.WirelessProbe(debuggingOn: false, port: nil, wifiAddress: nil))
+    }
+
+    @Test("same network is judged loosely")
+    func sameNetwork() {
+        #expect(ADBParsing.probablySameNetwork("192.168.31.5", "192.168.31.40"))
+        #expect(ADBParsing.probablySameNetwork("10.0.88.12", "10.0.91.3"))
+        #expect(!ADBParsing.probablySameNetwork("192.168.31.5", "10.0.88.12"))
+    }
+}
+
+@Suite("Reaching a phone directly")
+struct ReachabilityTests {
+
+    @Test("an open port is reachable, a closed one is not")
+    func reach() throws {
+        let listener = socket(AF_INET, SOCK_STREAM, 0)
+        defer { close(listener) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        _ = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        listen(listener, 1)
+        var bound = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &bound) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(listener, $0, &length) }
+        }
+        let port = UInt16(bigEndian: bound.sin_port)
+
+        #expect(WirelessReconnector.canReach("127.0.0.1:\(port)"))
+        close(listener)
+        #expect(!WirelessReconnector.canReach("127.0.0.1:\(port)"))
+        #expect(!WirelessReconnector.canReach("not an address"))
+    }
+}
+
+@Suite("Android's media index")
+struct MediaIndexTests {
+
+    @Test("rows become entries keyed by path, only directly in the folder")
+    func parse() {
+        let folder = "/storage/emulated/0/DCIM/Camera"
+        let output = """
+        Row: 0 _id=1000004220, media_type=1, date_added=1755964978, datetaken=1755964977024, _data=/storage/emulated/0/DCIM/Camera/IMG, with comma.jpg
+        Row: 1 _id=1000004300, media_type=3, date_added=1756000000, datetaken=NULL, _data=/storage/emulated/0/DCIM/Camera/VID_1.mp4
+        Row: 2 _id=1000004400, media_type=1, date_added=1756000001, datetaken=1756000001000, _data=/storage/emulated/0/DCIM/Camera/sub/deeper.jpg
+        Row: 3 _id=1000000665, media_type=0, date_added=1752789455, datetaken=NULL, _data=/storage/emulated/0/DCIM/Camera/notes.txt
+        """
+        let index = ADBParsing.mediaIndex(output, folder: folder)
+        #expect(index.count == 3)
+        let photo = index["\(folder)/IMG, with comma.jpg"]
+        #expect(photo == ADBParsing.MediaEntry(id: 1000004220, kind: .image,
+                                               created: Date(timeIntervalSince1970: 1755964977.024)))
+        #expect(photo?.thumbnailURI == "content://media/external/images/media/1000004220/thumbnail")
+        // No time taken: when it arrived stands in.
+        #expect(index["\(folder)/VID_1.mp4"]?.created == Date(timeIntervalSince1970: 1756000000))
+        #expect(index["\(folder)/VID_1.mp4"]?.thumbnailURI == "content://media/external/video/media/1000004300/thumbnail")
+        #expect(index["\(folder)/notes.txt"]?.thumbnailURI == nil)
+        #expect(index["\(folder)/sub/deeper.jpg"] == nil)
+    }
+
+    @Test("the folder is quoted for the shell and for SQL")
+    func command() {
+        #expect(ADBParsing.mediaIndexCommand(folder: "/storage/emulated/0/Kid's") ==
+                "content query --uri content://media/external/file --projection _id:media_type:date_added:datetaken:_data "
+                + "--where '_data LIKE '\\''/storage/emulated/0/Kid'\\'''\\''s/%'\\'''")
+    }
+}

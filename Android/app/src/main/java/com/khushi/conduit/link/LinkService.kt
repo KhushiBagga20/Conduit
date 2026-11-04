@@ -46,12 +46,14 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -73,6 +75,7 @@ class LinkService : Service() {
     private lateinit var macs: LinkedMacs
     private lateinit var discovery: MacDiscovery
     private lateinit var beacon: HotspotBeacon
+    private lateinit var files: FileSender
     private val hotspotGate = HotspotRequestGate()
     private var worker: Thread? = null
     @Volatile private var running = false
@@ -104,6 +107,9 @@ class LinkService : Service() {
         macs = LinkedMacs(this)
         discovery = MacDiscovery(this) { publishFound() }
         beacon = HotspotBeacon(this, ::hotspotRequested)
+        files = FileSender(this, ::askAndWait,
+            tell = { link, action, payload -> ask(link, action, payload) {} },
+            progress = ::filesProgress)
         val notifications = getSystemService(NotificationManager::class.java)
         notifications.createNotificationChannel(
             NotificationChannel(CHANNEL, "Conduit Link", NotificationManager.IMPORTANCE_LOW).apply {
@@ -118,6 +124,11 @@ class LinkService : Service() {
         notifications.createNotificationChannel(
             NotificationChannel(LINKS_CHANNEL, "Links from your Mac", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Links your Mac sends to this phone. Tap one to open it."
+            },
+        )
+        notifications.createNotificationChannel(
+            NotificationChannel(FILES_CHANNEL, "Files to your Mac", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Progress while this phone sends files to your Mac."
             },
         )
         instance = this
@@ -147,6 +158,13 @@ class LinkService : Service() {
                 val sensitive = intent.getBooleanExtra(EXTRA_SENSITIVE, false)
                 sendWhenLinked { link, mac -> sendClipboard(link, text, sensitive, mac) }
             }
+            // The files come as the intent's clip, which carries the right to
+            // read them over from the screen that picked them.
+            ACTION_SEND_FILES -> intent.clipData?.let { clip ->
+                val uris = (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
+                if (uris.isNotEmpty()) sendWhenLinked { link, mac -> files.send(link, mac, uris) }
+            }
+            ACTION_CANCEL_FILES -> files.cancel()
         }
 
         discovery.start()
@@ -165,6 +183,7 @@ class LinkService : Service() {
         main.removeCallbacksAndMessages(null)
         queued.set(null)
         beacon.stop()
+        files.shutdown()
         connection?.close()
         stopHeartbeat()
         discovery.stop()
@@ -314,6 +333,10 @@ class LinkService : Service() {
                 ActionName.NOTIFICATION_DISMISS -> notificationAction(connection, kind.requestId, envelope, open = false)
                     .also { Log.i(TAG, "the Mac dismissed a notification") }
                 ActionName.NOTIFICATION_OPEN -> notificationAction(connection, kind.requestId, envelope, open = true)
+                ActionName.FILE_CANCEL -> {
+                    (envelope.payload?.get("transferID") as? JsonPrimitive)?.intOrNull?.let(files::stoppedByMac)
+                    connection.send(Envelope(EnvelopeKind.Response(kind.requestId, Outcome.Success)))
+                }
                 else -> connection.send(Envelope(EnvelopeKind.Response(kind.requestId, Outcome.Failure(
                     ProtocolError(ErrorCode.UNSUPPORTED, "This version of Conduit for Android does not do that yet."),
                 ))))
@@ -327,11 +350,31 @@ class LinkService : Service() {
      * Send a command and hand its answer to [answered]; null means it went
      * unanswered for the 15 seconds the spec allows.
      */
-    private fun ask(connection: LinkConnection, action: String, payload: JsonObject?, answered: (Outcome?) -> Unit) {
+    private fun ask(
+        connection: LinkConnection,
+        action: String,
+        payload: JsonObject?,
+        timeoutMillis: Long = ANSWER_MILLIS,
+        answered: (Outcome?) -> Unit,
+    ) {
         val requestId = UUID.randomUUID().toString()
         awaiting[requestId] = answered
         connection.send(Envelope(EnvelopeKind.Command(requestId, action), payload))
-        main.postDelayed({ awaiting.remove(requestId)?.invoke(null) }, ANSWER_MILLIS)
+        main.postDelayed({ awaiting.remove(requestId)?.invoke(null) }, timeoutMillis)
+    }
+
+    /** [ask], for a thread that can wait. Never call it on the main thread. */
+    private fun askAndWait(connection: LinkConnection, action: String, payload: JsonObject, timeoutMillis: Long): Outcome? {
+        val answered = CountDownLatch(1)
+        var outcome: Outcome? = null
+        ask(connection, action, payload, timeoutMillis) {
+            outcome = it
+            answered.countDown()
+        }
+        // The timeout above answers null; this one is only for a service
+        // torn down before it could.
+        answered.await(timeoutMillis + 5_000, TimeUnit.MILLISECONDS)
+        return outcome
     }
 
     // Notifications
@@ -476,6 +519,50 @@ class LinkService : Service() {
 
     private val giveUpOnQueued = Runnable {
         if (queued.getAndSet(null) != null) toast("Couldn't reach your Mac, so nothing was sent.")
+    }
+
+    // Files
+
+    private fun filesProgress(progress: FileSender.Progress) {
+        val notifications = getSystemService(NotificationManager::class.java)
+        when (progress) {
+            is FileSender.Progress.Sending -> {
+                LinkHub.update { it.copy(sending = LinkHub.Sending(progress.file, progress.files, progress.fraction)) }
+                val cancel = PendingIntent.getService(this, 1,
+                    Intent(this, LinkService::class.java).setAction(ACTION_CANCEL_FILES), PendingIntent.FLAG_IMMUTABLE)
+                val title = if (progress.files == 1) "Sending a file to ${progress.macName}"
+                else "Sending ${progress.file} of ${progress.files} files to ${progress.macName}"
+                notifications.notify(FILES_NOTIFICATION_ID, Notification.Builder(this, FILES_CHANNEL)
+                    .setSmallIcon(R.drawable.ic_link)
+                    .setContentTitle(title)
+                    .setContentText("${(progress.fraction * 100).toInt()}%")
+                    .setProgress(1000, (progress.fraction * 1000).toInt(), false)
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .addAction(Notification.Action.Builder(null, "Cancel", cancel).build())
+                    .build())
+            }
+            is FileSender.Progress.Done -> {
+                LinkHub.update { it.copy(sending = null) }
+                val sent = when (progress.sent) {
+                    0 -> null
+                    1 -> "Sent a file to ${progress.macName}"
+                    else -> "Sent ${progress.sent} files to ${progress.macName}"
+                }
+                val title = when {
+                    progress.failure == null -> sent ?: "Nothing was sent"
+                    sent == null -> "Couldn't send to ${progress.macName}"
+                    else -> "$sent, then stopped"
+                }
+                notifications.notify(FILES_NOTIFICATION_ID, Notification.Builder(this, FILES_CHANNEL)
+                    .setSmallIcon(R.drawable.ic_link)
+                    .setContentTitle(title)
+                    .setContentText(progress.failure ?: "In the Mac's folder for this phone's files.")
+                    .setAutoCancel(true)
+                    .build())
+                toast(title)
+            }
+        }
     }
 
     // Clipboard
@@ -657,6 +744,10 @@ class LinkService : Service() {
         private const val ACTION_STOP = "com.khushi.conduit.link.STOP"
         private const val ACTION_SEND_LINK = "com.khushi.conduit.link.SEND_LINK"
         private const val ACTION_SEND_CLIPBOARD = "com.khushi.conduit.link.SEND_CLIPBOARD"
+        private const val ACTION_SEND_FILES = "com.khushi.conduit.link.SEND_FILES"
+        private const val ACTION_CANCEL_FILES = "com.khushi.conduit.link.CANCEL_FILES"
+        private const val FILES_CHANNEL = "files"
+        private const val FILES_NOTIFICATION_ID = 9
         private const val EXTRA_TEXT = "text"
         private const val EXTRA_SENSITIVE = "sensitive"
         /** The Mac's limit is 256 KiB; characters are at least one byte each. */
@@ -738,6 +829,20 @@ class LinkService : Service() {
         fun sendClipboard(context: Context, text: String, sensitive: Boolean) {
             context.startForegroundService(Intent(context, LinkService::class.java)
                 .setAction(ACTION_SEND_CLIPBOARD).putExtra(EXTRA_TEXT, text).putExtra(EXTRA_SENSITIVE, sensitive))
+        }
+
+        /**
+         * Send files to the linked Mac, starting the link first if it is not
+         * running. The right to read them goes along with the intent.
+         */
+        fun sendFiles(context: Context, uris: List<Uri>) {
+            if (uris.isEmpty()) return
+            val clip = ClipData.newRawUri("Files", uris.first())
+            uris.drop(1).forEach { clip.addItem(ClipData.Item(it)) }
+            val intent = Intent(context, LinkService::class.java).setAction(ACTION_SEND_FILES)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            intent.clipData = clip
+            context.startForegroundService(intent)
         }
 
         /** Send a web link to the linked Mac, which opens it, starting the link first if it is not running. */

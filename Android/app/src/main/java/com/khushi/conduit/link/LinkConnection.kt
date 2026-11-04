@@ -23,6 +23,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -63,6 +64,8 @@ class LinkConnection(
     private var opener: LinkCrypto.Opener? = null
     /** Input frames waiting to go out, for the backpressure rule in §7. */
     private val queuedInput = AtomicInteger(0)
+    /** Pieces of a file waiting to go out: a few, so a large file is never all in memory. */
+    private val fileWindow = Semaphore(MAX_QUEUED_FILE_CHUNKS)
     @Volatile private var ready = false
     @Volatile private var closed = false
     private var closeError: ProtocolError? = null
@@ -128,6 +131,32 @@ class LinkConnection(
         } catch (_: RejectedExecutionException) {
             queuedInput.decrementAndGet()
         }
+    }
+
+    /** Ready, and not yet ended. */
+    val isOpen: Boolean get() = ready && !closed
+
+    /**
+     * A piece of a file (§7). Blocks the caller while a few pieces are
+     * already waiting, so reading the file never runs ahead of the network.
+     * False once the connection has ended.
+     */
+    fun sendBlocking(frame: Frame): Boolean {
+        if (closed) return false
+        fileWindow.acquire()
+        try {
+            worker.execute {
+                try {
+                    if (ready) send(frame.payload, frame.channel, frame.type, sealed = true)
+                } finally {
+                    fileWindow.release()
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            fileWindow.release()
+            return false
+        }
+        return !closed
     }
 
     private fun onWorker(task: () -> Unit) {
@@ -226,5 +255,6 @@ class LinkConnection(
     private companion object {
         const val TAG = "ConduitLink"
         const val MAX_QUEUED_INPUT = 16
+        const val MAX_QUEUED_FILE_CHUNKS = 4
     }
 }

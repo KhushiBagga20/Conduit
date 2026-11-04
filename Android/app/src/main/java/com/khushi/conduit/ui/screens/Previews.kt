@@ -27,6 +27,7 @@ internal fun HomeSample(dark: Boolean, phone: PhoneSetupSample = PhoneSetupSampl
                 onOpen = {},
                 onTrackpad = {},
                 onRing = {},
+                onSendFiles = {},
             )
         }
     }

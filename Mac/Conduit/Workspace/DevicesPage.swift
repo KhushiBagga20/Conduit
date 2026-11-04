@@ -207,6 +207,17 @@ struct DevicesPage: View {
             .padding(.vertical, 4)
 
             LabeledContent("Connected over", value: phone.connection.isConnected ? phone.transportSummary : "—")
+            LabeledContent {
+                HStack(spacing: 5) {
+                    StatusDot(phone.wifi.tone, size: 7)
+                    Text(phone.wifi.shortText)
+                }
+            } label: {
+                Text("Without the cable")
+                if let detail = phone.wifi.detail(keepsConnected: store.preferences.autoConnectWireless) {
+                    Text(detail)
+                }
+            }
             LabeledContent("Model", value: phone.modelText)
             LabeledContent("Software", value: phone.androidVersionText)
             if !phone.connection.isConnected, let lastSeen = phone.lastSeen {

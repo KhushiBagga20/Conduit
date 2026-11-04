@@ -31,6 +31,11 @@ public final class ConduitEngine: ConduitCommands {
     private var tracker: DeviceTracker?
     private let discovery = WirelessDiscovery()
     private var reconnector: WirelessReconnector?
+    /// Phones whose Wireless debugging Conduit turned on this launch — once,
+    /// so a person who turns it off again is not fought.
+    private var enabledWireless: Set<String> = []
+    private var wirelessChecks: Set<String> = []
+    private var wirelessTimer: Timer?
     private var mirroring: MirroringController?
     private var settingsGuard: PhoneSettingsGuard?
     private var touchGuard: PhoneTouchGuard?
@@ -53,6 +58,16 @@ public final class ConduitEngine: ConduitCommands {
     private var linkSendGeneration = 0
     private let ringer = MacRinger()
     private let trackpad = TrackpadInput()
+    /// Files the phone sends over the Link; when this Mac gives up on one,
+    /// the phone is told to stop sending it.
+    private lazy var fileReceiver: LinkFileReceiver = {
+        let receiver = LinkFileReceiver(store: store)
+        receiver.onAbandoned = { [weak self] peerID, transferID in
+            self?.linkServer?.send(Envelope.command(.fileCancel, payload: ["transferID": .int(Int64(transferID))]),
+                                   to: peerID)
+        }
+        return receiver
+    }()
     /// When the phone last moved the pointer, to show that it is in control.
     private var lastPhoneInput = Date.distantPast
     private var trackpadIdleCheck: DispatchWorkItem?
@@ -165,6 +180,16 @@ public final class ConduitEngine: ConduitCommands {
         reconnector.hotspotTargets = { [weak self] in
             self?.known.compactMapValues(\.hotspotPort) ?? [:]
         }
+        reconnector.rememberedTargets = { [weak self] in
+            guard let self else { return [] }
+            return known.values.flatMap { phone -> [(phoneID: String, target: String)] in
+                guard let wireless = phone.wireless, let address = wireless.address else { return [] }
+                var targets: [(phoneID: String, target: String)] = []
+                if wireless.debuggingOn, let port = wireless.port { targets.append((phone.id, "\(address):\(port)")) }
+                if let port = phone.hotspotPort { targets.append((phone.id, "\(address):\(port)")) }
+                return targets
+            }
+        }
         reconnector.record = { [weak self] event in self?.store.record(event) }
         reconnector.onConnected = { [weak self] serial, phoneID in self?.wifiTransportConnected(serial, phoneID: phoneID) }
         self.reconnector = reconnector
@@ -182,6 +207,7 @@ public final class ConduitEngine: ConduitCommands {
         Task {
             await Task.detached { adb.startServer() }.value
             tracker.start()
+            startWirelessChecks()
             if store.preferences.autoConnectWireless {
                 discovery.start()
                 reconnector.start()
@@ -412,6 +438,9 @@ public final class ConduitEngine: ConduitCommands {
         server.onInput = { [weak self] event, peer in
             self?.phoneInput(event, from: peer)
         }
+        server.onFile = { [weak self] chunk, peer in
+            self?.fileReceiver.chunk(chunk, from: peer)
+        }
         server.onClosed = { [weak self] peer, error in
             guard let self else { return }
             if let peer {
@@ -420,7 +449,10 @@ public final class ConduitEngine: ConduitCommands {
             } else if let error, store.link.pairingRequest != nil {
                 store.record(ActivityEvent(kind: .error, title: "Pairing didn't finish", detail: error.message))
             }
-            if let peer { linkedNow.remove(peer.id) }
+            if let peer {
+                linkedNow.remove(peer.id)
+                fileReceiver.peerLeft(peer.id)
+            }
             // The phone's notifications belong to the phone: when it goes,
             // what this Mac is showing goes with it.
             store.removeAllNotifications()
@@ -516,7 +548,10 @@ public final class ConduitEngine: ConduitCommands {
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             let online = path.status == .satisfied
-            Task { @MainActor [weak self] in self?.networkChanged(online: online) }
+            Task { @MainActor [weak self] in
+                self?.networkChanged(online: online)
+                if online { self?.reconnector?.networkChanged() }
+            }
         }
         monitor.start(queue: .main)
         networkMonitor = monitor
@@ -592,6 +627,13 @@ public final class ConduitEngine: ConduitCommands {
         case .command(let requestID, let action) where action == .macFind:
             ring(for: peer)
             linkServer?.send(Envelope.success(to: requestID), to: peer.id)
+        case .command(let requestID, let action) where action == .fileOffer:
+            answer(requestID, fileReceiver.offer(envelope.payload, from: peer), to: peer)
+        case .command(let requestID, let action) where action == .fileFinish:
+            answer(requestID, fileReceiver.finish(envelope.payload, from: peer), to: peer)
+        case .command(let requestID, let action) where action == .fileCancel:
+            fileReceiver.cancel(envelope.payload, from: peer)
+            linkServer?.send(Envelope.success(to: requestID), to: peer.id)
         case .response(let requestID, let outcome):
             linkAnswered(requestID: requestID, outcome: outcome, payload: envelope.payload)
         case .command(let requestID, let action):
@@ -601,6 +643,13 @@ public final class ConduitEngine: ConduitCommands {
             CoreLog.engine.debug("Conduit Link: no handler for \(action.rawValue)")
         case .event(let name, _, _, _):
             phoneEvent(name, payload: envelope.payload, from: peer)
+        }
+    }
+
+    private func answer(_ requestID: String, _ result: Result<Void, ProtocolError>, to peer: LinkPeer) {
+        switch result {
+        case .success: linkServer?.send(Envelope.success(to: requestID), to: peer.id)
+        case .failure(let error): linkServer?.send(Envelope.failure(to: requestID, error), to: peer.id)
         }
     }
 
@@ -876,26 +925,42 @@ public final class ConduitEngine: ConduitCommands {
     /// the Mac where Bonjour cannot: on the phone's own hotspot, or before
     /// macOS lets Conduit advertise itself. It only says where to knock — the
     /// handshake still proves who answers.
+    ///
+    /// MEASURED: on some networks the phone cannot reach this Mac even though
+    /// this Mac reaches the phone — one subnet behind another, or a router
+    /// that keeps its clients apart. adb can carry the Link the other way:
+    /// the phone dials its own 127.0.0.1, last, and adb brings the
+    /// connection here, over USB or wireless debugging. It reaches only
+    /// this Mac's listener, where the handshake still decides.
     private func sendLinkHint(serial: String) {
         guard let adb, let port = store.link.port, let identity = linkIdentity else { return }
         let hosts = LinkAddresses.ipv4()
-        guard !hosts.isEmpty else { return }
         let name = Host.current().localizedName ?? "Mac"
         Task.detached {
+            let tunnelled = adb.run(["-s", serial, "reverse", "tcp:\(port)", "tcp:\(port)"], timeout: 8).ok
+            let all = hosts + (tunnelled ? ["127.0.0.1"] : [])
+            guard !all.isEmpty else { return }
             adb.run(["-s", serial, "shell", "am", "broadcast", "-f", "32",
                      "-n", "com.khushi.conduit/com.khushi.conduit.link.MacHint",
                      "--es", "id", identity.deviceID, "--es", "name", ADBParsing.shellQuoted(name),
-                     "--es", "hosts", hosts.joined(separator: ","), "--ei", "port", String(port)], timeout: 8)
+                     "--es", "hosts", all.joined(separator: ","), "--ei", "port", String(port)], timeout: 8)
         }
     }
 
     private func sendLinkHintToAttachedPhones() {
-        for transport in attached.values where transport.device.isReady {
-            guard let phoneID = transport.properties?.hardwareSerial ?? transport.identityHint,
-                  case .installed = companionApps[phoneID] ?? .unknown
-            else { continue }
-            sendLinkHint(serial: transport.device.serial)
+        let phoneIDs = Set(attached.values.compactMap { $0.properties?.hardwareSerial ?? $0.identityHint })
+        for phoneID in phoneIDs {
+            guard case .installed = companionApps[phoneID] ?? .unknown else { continue }
+            sendLinkHint(phoneID: phoneID)
         }
+    }
+
+    /// Over the phone's best transport only: adb carries a tunnel on one at
+    /// a time, and MEASURED, USB moved 17 MB/s where Wi-Fi debugging on the
+    /// same desk moved 1.4.
+    private func sendLinkHint(phoneID: String) {
+        guard let best = PhoneRegistry.targets(for: phoneID, attached: Array(attached.values)).first else { return }
+        sendLinkHint(serial: best.serial)
     }
 
     private func publishLinkedPhones() {
@@ -939,7 +1004,7 @@ public final class ConduitEngine: ConduitCommands {
             guard let status = await Task.detached(operation: { adb.companionAppStatus(serial: serial) }).value else { return }
             companionApps[phoneID] = status
             publishPhones()
-            if case .installed = status { sendLinkHint(serial: serial) }
+            if case .installed = status { sendLinkHint(phoneID: phoneID) }
         }
     }
 
@@ -1043,6 +1108,9 @@ public final class ConduitEngine: ConduitCommands {
             let before = store.phones
             attached[serial]?.properties = properties
             remember(properties)
+            if attached[serial]?.transport == .usb {
+                checkWireless(phoneID: properties.hardwareSerial, serial: serial)
+            }
             publishPhones()
             recordConnectionChanges(from: before, to: store.phones)
             announcePendingConnections()
@@ -1062,6 +1130,87 @@ public final class ConduitEngine: ConduitCommands {
         saveKnownPhones()
     }
 
+    // MARK: - Without the cable
+
+    /// Over the cable, ask the phone whether Wireless debugging is on, where
+    /// it listens and where the phone is on Wi-Fi — and, if this Mac keeps
+    /// phones connected over Wi-Fi, turn Wireless debugging on, so pulling
+    /// the cable leaves something to carry on over.
+    private func checkWireless(phoneID: String, serial: String) {
+        guard let adb, !wirelessChecks.contains(phoneID) else { return }
+        wirelessChecks.insert(phoneID)
+        Task {
+            let probe = await Task.detached { adb.wirelessProbe(serial: serial) }.value
+            wirelessChecks.remove(phoneID)
+            guard let probe, known[phoneID] != nil else { return }
+            known[phoneID]?.wireless = WirelessInfo(debuggingOn: probe.debuggingOn, address: probe.wifiAddress,
+                                                    port: probe.port, checked: Date())
+            saveKnownPhones()
+            publishPhones()
+
+            // MEASURED on a Galaxy S24 Ultra: the switch can read on while
+            // nothing listens — Android waits for the Wi-Fi network to be
+            // allowed on the phone, and no question is on screen. Switching
+            // it off and on again puts the question in front of the person.
+            let waiting = probe.debuggingOn && probe.port == nil
+            if store.preferences.autoConnectWireless, probe.wifiAddress != nil, !probe.debuggingOn || waiting,
+               !enabledWireless.contains(phoneID) {
+                enabledWireless.insert(phoneID)
+                if waiting {
+                    _ = await Task.detached {
+                        adb.run(["-s", serial, "shell", "settings", "put", "global", "adb_wifi_enabled", "0"], timeout: 8)
+                    }.value
+                    try? await Task.sleep(for: .milliseconds(1500))
+                }
+                let turnedOn = await Task.detached { adb.enableWirelessDebugging(serial: serial) }.value
+                if turnedOn {
+                    let name = known[phoneID]?.name ?? "the phone"
+                    CoreLog.engine.notice(waiting ? "asked the phone to allow Wireless debugging on its network"
+                                                  : "turned on Wireless debugging over the cable")
+                    store.record(ActivityEvent(kind: .reconnecting,
+                                               title: waiting ? "Allow Wireless debugging on \(name)" : "Turned on Wireless debugging on \(name)",
+                                               detail: waiting
+                                                   ? "It is on but waiting for this Wi-Fi network to be allowed. On the phone, choose Always allow on this network."
+                                                   : "So it stays connected when you unplug. If the phone asks, choose Always allow on this network."))
+                    // Its port is known a moment later.
+                    try? await Task.sleep(for: .seconds(3))
+                    checkWireless(phoneID: phoneID, serial: serial)
+                }
+            }
+            reconnector?.evaluate()
+        }
+    }
+
+    /// Looks again at plugged-in phones not yet reachable over Wi-Fi: the
+    /// port moves, and a phone can join or leave Wi-Fi while plugged in.
+    private func startWirelessChecks() {
+        wirelessTimer?.invalidate()
+        wirelessTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                for usb in self.attached.values where usb.transport == .usb && usb.device.isReady && usb.properties != nil {
+                    let phoneID = usb.phoneID
+                    let overWiFi = self.attached.values.contains { $0.phoneID == phoneID && $0.transport == .wifi && $0.device.isReady }
+                    if !overWiFi { self.checkWireless(phoneID: phoneID, serial: usb.device.serial) }
+                }
+            }
+        }
+    }
+
+    private func wifiReachability(for phone: PhoneDevice) -> WifiReachability {
+        if phone.transports.contains(.wifi) { return .connected }
+        guard let wireless = known[phone.id]?.wireless else { return .unknown }
+        guard let address = wireless.address else { return .notOnWiFi }
+        let hotspotPort = known[phone.id]?.hotspotPort
+        guard wireless.debuggingOn || hotspotPort != nil else { return .debuggingOff }
+        if wireless.port == nil, hotspotPort == nil { return .waitingForApproval }
+        let mac = LinkAddresses.ipv4()
+        if let first = mac.first, !mac.contains(where: { ADBParsing.probablySameNetwork($0, address) }) {
+            return .differentNetwork(phone: address, mac: first)
+        }
+        return reconnector?.hasFailed(phone.id) == true ? .unreachable : .trying
+    }
+
     private func saveKnownPhones() {
         if let data = try? JSONEncoder().encode(Array(known.values)) {
             defaults.set(data, forKey: Key.knownPhones)
@@ -1073,12 +1222,17 @@ public final class ConduitEngine: ConduitCommands {
             updatePhoneClipboard()
             phoneFiles?.use(serial: store.activePhoneID.flatMap {
                 PhoneRegistry.targets(for: $0, attached: Array(attached.values)).first?.serial
-            })
+            }, phoneID: store.activePhoneID)
         }
         store.phones = PhoneRegistry.phones(attached: Array(attached.values), known: known,
                                             preferredID: store.preferences.preferredPhoneID,
                                             companionApps: companionApps,
                                             gateway: HotspotLink.currentGateway())
+            .map { phone in
+                var phone = phone
+                phone.wifi = wifiReachability(for: phone)
+                return phone
+            }
 
         // Keep the user's choice while it exists; otherwise prefer the
         // preferred phone, then any connected phone, then anything known.
@@ -1109,8 +1263,17 @@ public final class ConduitEngine: ConduitCommands {
                 }
                 announceConnection(phone, over: transport)
             case .unauthorized:
-                store.record(ActivityEvent(kind: .permissionRequired, title: "Allow debugging on \(phone.name)",
-                                           detail: "Tap Allow on the phone so this Mac can connect."))
+                // MEASURED: a phone this Mac had used asked again after every
+                // reconnect when its approval was given without "Always
+                // allow", and Android forgets an approval after seven days
+                // without a connection. Each looks like Conduit failing,
+                // cable or not.
+                let knownBefore = known[phone.id] != nil
+                store.record(ActivityEvent(
+                    kind: .permissionRequired, title: "Allow debugging on \(phone.name)",
+                    detail: knownBefore
+                        ? "The phone has forgotten this Mac. Tick Always allow from this computer, then Allow — and turn on Disable adb authorization timeout in Developer options, so it remembers past seven days."
+                        : "Tick Always allow from this computer on the phone, then Allow, so this Mac isn't asked again."))
             case .disconnected where previous?.isConnected == true:
                 announcedPhones.remove(phone.id)
                 store.record(ActivityEvent(kind: .phoneDisconnected, title: "\(phone.name) disconnected"))
@@ -1170,8 +1333,17 @@ public final class ConduitEngine: ConduitCommands {
     public func openPhoneFile(_ file: PhoneFile) { phoneFiles?.openCopy(file) }
     public func editPhoneFile(_ file: PhoneFile) { phoneFiles?.edit(file) }
     public func stopEditing(id: UUID) { phoneFiles?.stopEditing(id) }
-    public func cancelTransfer(id: UUID) { phoneFiles?.cancel(id) }
-    public func clearFinishedTransfers() { phoneFiles?.clearFinished() }
+    public func requestThumbnail(for file: PhoneFile) { phoneFiles?.requestThumbnail(for: file) }
+    public func cancelThumbnail(for file: PhoneFile) { phoneFiles?.cancelThumbnail(for: file) }
+    public func exportPhoneFile(_ file: PhoneFile) async throws -> URL {
+        guard let phoneFiles else { throw ADBSync.Failure.connection("adb isn't available") }
+        return try await phoneFiles.export(file)
+    }
+    public func cancelTransfer(id: UUID) {
+        if fileReceiver.owns(row: id) { fileReceiver.cancel(row: id) } else { phoneFiles?.cancel(id) }
+    }
+    // Files from the phone over the Link land here too, with or without adb.
+    public func clearFinishedTransfers() { store.files.transfers.removeAll(where: \.isFinished) }
 
     // MARK: - Clipboard
 

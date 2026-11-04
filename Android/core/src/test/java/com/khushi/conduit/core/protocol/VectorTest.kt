@@ -131,6 +131,21 @@ class VectorTest {
     }
 
     @Test
+    fun fileChunksMatchTheVectorBytes() {
+        val chunk = FileChunk(7, 65_536, "hi".encodeToByteArray())
+        assertTrue(chunk.toFrame().encode().contentEquals(hex("05000000000e0000000700000000000100006869")))
+        assertEquals(chunk, FileChunk.from(chunk.toFrame()))
+
+        // Only the first bytes of a reused buffer go out.
+        val buffer = "hi there".encodeToByteArray()
+        assertTrue(FileChunk.frame(7, 65_536, buffer, 2).encode().contentEquals(hex("05000000000e0000000700000000000100006869")))
+
+        val far = FileChunk(-1, (5L shl 32) + 3, ByteArray(0))
+        assertEquals(far, FileChunk.from(far.toFrame()))
+        assertNull(FileChunk.from(Frame(LinkChannel.FILE, 0, ByteArray(11))))
+    }
+
+    @Test
     fun unknownErrorCodesArePreservedAndNormalised() {
         val failure = Envelope(EnvelopeKind.Response("r", Outcome.Failure(ProtocolError("some_future_code", "New"))))
         val decoded = Envelope.decode(failure.encode()).kind as EnvelopeKind.Response

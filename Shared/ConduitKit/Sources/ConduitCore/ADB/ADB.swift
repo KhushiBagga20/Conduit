@@ -32,6 +32,8 @@ nonisolated struct ADB: Sendable {
         let status: Int32
         let stdout: String
         let stderr: String
+        /// Standard output as bytes, for commands whose output is not text.
+        var data = Data()
         var ok: Bool { status == 0 }
         var combined: String { stdout + stderr }
     }
@@ -83,7 +85,7 @@ nonisolated struct ADB: Sendable {
         errPipe.fileHandleForReading.readabilityHandler = nil
 
         let status = process.isRunning ? -1 : process.terminationStatus
-        return Output(status: status, stdout: buffer.stdout, stderr: buffer.stderr)
+        return Output(status: status, stdout: buffer.stdout, stderr: buffer.stderr, data: buffer.stdoutData)
     }
 
     /// Start the adb server detached from any pipe, so later calls never
@@ -152,6 +154,37 @@ nonisolated struct ADB: Sendable {
         return port
     }
 
+    /// What Android's media index knows about the files directly in a folder.
+    func mediaIndex(serial: String, folder: String) -> [String: ADBParsing.MediaEntry] {
+        let output = run(["-s", serial, "shell", ADBParsing.mediaIndexCommand(folder: folder)], timeout: 20)
+        guard output.ok else { return [:] }
+        return ADBParsing.mediaIndex(output.stdout, folder: folder)
+    }
+
+    /// Android's own thumbnail for a photo or video, as JPEG — from the phone's
+    /// thumbnail cache, so nothing large crosses the cable. exec-out keeps the
+    /// bytes exactly as sent.
+    func thumbnail(serial: String, entry: ADBParsing.MediaEntry) -> Data? {
+        guard let uri = entry.thumbnailURI else { return nil }
+        let output = run(["-s", serial, "exec-out", "content", "read", "--uri", uri], timeout: 15)
+        // A JPEG starts FF D8; anything else is the provider's error text.
+        guard output.ok, output.data.count > 64, output.data.prefix(2) == Data([0xFF, 0xD8]) else { return nil }
+        return output.data
+    }
+
+    /// Wireless debugging's state and where the phone is on Wi-Fi.
+    func wirelessProbe(serial: String) -> ADBParsing.WirelessProbe? {
+        let output = run(["-s", serial, "shell", ADBParsing.wirelessProbeCommand], timeout: 8)
+        guard output.ok else { return nil }
+        return ADBParsing.wirelessProbe(output.stdout)
+    }
+
+    /// Turns Wireless debugging on. The first time on a network, the phone
+    /// asks whether to allow it there.
+    func enableWirelessDebugging(serial: String) -> Bool {
+        run(["-s", serial, "shell", "settings", "put", "global", "adb_wifi_enabled", "1"], timeout: 8).ok
+    }
+
     /// The phone's hardware serial, to check who answered at an address.
     func hardwareSerial(of serial: String) -> String? {
         let output = run(["-s", serial, "shell", "getprop", "ro.serialno"], timeout: 8)
@@ -189,6 +222,7 @@ nonisolated final class OutputBuffer: @unchecked Sendable {
     func appendOut(_ data: Data) { lock.withLock { out.append(data) } }
     func appendErr(_ data: Data) { lock.withLock { err.append(data) } }
     var stdout: String { lock.withLock { String(decoding: out, as: UTF8.self) } }
+    var stdoutData: Data { lock.withLock { out } }
     var stderr: String { lock.withLock { String(decoding: err, as: UTF8.self) } }
 }
 

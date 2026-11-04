@@ -1,6 +1,8 @@
 package com.khushi.conduit.ui.screens
 
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.rounded.DeveloperMode
 import androidx.compose.material.icons.rounded.LaptopMac
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.MaterialTheme
@@ -66,6 +69,10 @@ import com.khushi.conduit.ui.theme.LocalStatusColors
 fun HomeScreen() {
     val context = LocalContext.current
     val link by LinkHub.state.collectAsState()
+    // The system's own picker: photos, videos, downloads, anything.
+    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        LinkService.sendFiles(context, uris)
+    }
 
     HomeContent(
         phone = rememberPhoneSettings(),
@@ -76,6 +83,7 @@ fun HomeScreen() {
         onOpen = { it.open(context) },
         onTrackpad = { context.startActivity(Intent(context, TrackpadActivity::class.java)) },
         onRing = { LinkService.ring(context) },
+        onSendFiles = { pickFiles.launch(arrayOf("*/*")) },
     )
 }
 
@@ -89,6 +97,7 @@ fun HomeContent(
     onOpen: (SystemScreen) -> Unit,
     onTrackpad: () -> Unit,
     onRing: () -> Unit,
+    onSendFiles: () -> Unit,
 ) {
     Column(
         Modifier
@@ -105,6 +114,8 @@ fun HomeContent(
             MacRow(link)
             Line()
             ItemRow("Use as trackpad", icon = Icons.Rounded.TouchApp, onClick = onTrackpad) { Chevron() }
+            Line()
+            SendFilesRow(link, onSendFiles)
             Line()
             ItemRow("Ring your Mac", icon = Icons.Rounded.NotificationsActive, onClick = onRing) { Chevron() }
         }
@@ -160,6 +171,25 @@ private fun MacRow(link: LinkHub.State) {
         supportingColor = if (tone == StatusTone.CONNECTED) LocalStatusColors.current.connected else null,
         icon = Icons.Rounded.LaptopMac,
     ) { StatusDot(tone) }
+}
+
+/** Pick files to send; while they go, how far along they are. */
+@Composable
+private fun SendFilesRow(link: LinkHub.State, onSendFiles: () -> Unit) {
+    val sending = link.sending
+    val detail = when {
+        sending == null -> "Photos, videos or any file, to the Mac's folder"
+        sending.files == 1 -> "Sending a file…"
+        else -> "Sending ${sending.file} of ${sending.files}…"
+    }
+    ItemRow(
+        "Send files to Mac",
+        supporting = detail,
+        icon = Icons.Rounded.UploadFile,
+        onClick = onSendFiles.takeIf { sending == null },
+    ) {
+        if (sending != null) TrailingText("${(sending.fraction * 100).toInt()}%") else Chevron()
+    }
 }
 
 @Composable

@@ -29,7 +29,7 @@ and works over any network the two share — including the phone's hotspot.
 | **C · Device state** | Battery, charging and network shown on the Mac from the phone itself, not from adb polling | B | Planned |
 | **D · Links** | Share a link from the phone to the Mac and back, from the share sheet and the menu bar | B | Done — checked both ways on the phone |
 | **E · Find my Mac** | Ring this Mac from the phone | B | Done — rang on the phone's request |
-| **F · Files** | Browse the phone and move files both ways; edit in place; then over the link's file channel, and in Finder | B | In progress — browsing and moving files and folders over adb is built and checked on the phone (adb's own sync protocol, byte for byte, as fast as adb), and so is editing in place — saves go back to the phone, and a save after the phone's copy changed goes beside it; files over Conduit Link and in Finder are next |
+| **F · Files** | Browse the phone and move files both ways; edit in place; then over the link's file channel, and in Finder | B | In progress — browsing and moving files and folders over adb is built and checked on the phone (adb's own sync protocol, byte for byte, as fast as adb), and so is editing in place — saves go back to the phone, and a save after the phone's copy changed goes beside it. The browser sorts by name, size, date created or date modified, shows the phone's own thumbnails for photos and videos (Android's media index, read over adb — checked on the phone, about a second each), and drags files out into Finder (built, not yet tried by hand). Conduit for Android sends files to the Mac over Conduit Link, from the share sheet or Home, each checked with SHA-256 — checked on the phone: 40 MB in about a second over USB. A Finder sidebar entry is next |
 | **G · Notifications** | Phone notifications on the Mac, opt-in per app, with dismiss | B | Built — check pending: Android 16 treats notification access for a sideloaded app as a restricted setting, and it has not been granted yet |
 | **H · Phone as trackpad** | The phone's screen drives the Mac's pointer; needs macOS Accessibility permission | B | Built, not working yet — the Mac had never been granted Accessibility, and no pointer has moved from the phone |
 | **I · Calls** | Incoming call events on the Mac, and answer/decline where Android allows it | B, G | Planned |
@@ -74,6 +74,27 @@ These shape the product and are shown in the UI rather than hidden.
   hotspot. That port stays open on every network the phone joins until it is
   turned off or the phone restarts, so Conduit says so plainly and offers
   the switch.
+- **Some Wi-Fi networks keep their devices apart** — offices, campuses and
+  hotels often do. Nothing can reach the phone over them: its Bonjour advert
+  never arrives and its address answers "Host is down". Conduit says so in
+  Devices → Without the cable; the phone's hotspot works instead, and
+  Conduit reconnects over it by itself (checked on a Galaxy S24 Ultra: back
+  eight seconds after launch, no cable, files moved byte for byte).
+- **Some networks let the Mac reach the phone but not the other way** —
+  one subnet behind another, as on the test desk (the Mac on 192.168.1.x,
+  the phone on 192.168.31.x). Conduit Link is dialled by the phone, so it
+  could not connect. The Mac now opens a tunnel back through adb (`adb
+  reverse`) and tells the phone to try its own 127.0.0.1 last; the Link then
+  rides adb's connection, over USB when the cable is in (17 MB/s measured)
+  or wireless debugging (1.4 MB/s on that network).
+- **Android forgets a computer it was not told to remember.** Approved
+  without "Always allow from this computer", the phone asks again after
+  every reconnect; approved with it, it still forgets after seven days
+  without a connection unless "Disable adb authorization timeout" is on.
+  Either looks like Conduit failing, cable or not, so Conduit says which.
+- **Wireless debugging waits for each new Wi-Fi network to be allowed.** It
+  reads as on while nothing listens; Conduit notices over the cable and puts
+  the question on the phone's screen.
 - **Turning the phone's screen off leaves its touchscreen live** on the test
   phone, and adb cannot disable an input device. Conduit for Android
   swallows those touches with an accessibility service while the Mac has the

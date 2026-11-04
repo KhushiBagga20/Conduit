@@ -49,6 +49,13 @@
       "type": 0,
       "payloadHex": "001ea0",
       "frameHex": "030000000003001ea0"
+    },
+    {
+      "name": "file chunk: transfer 7, offset 65536, bytes \"hi\"",
+      "channel": 5,
+      "type": 0,
+      "payloadHex": "0000000700000000000100006869",
+      "frameHex": "05000000000e0000000700000000000100006869"
     }
   ],
   "rejected": [
@@ -65,6 +72,11 @@
     {
       "name": "unknown type 9 on input",
       "hex": "010900000000",
+      "reason": "unknown_type"
+    },
+    {
+      "name": "unknown type 1 on file",
+      "hex": "050100000000",
       "reason": "unknown_type"
     },
     {

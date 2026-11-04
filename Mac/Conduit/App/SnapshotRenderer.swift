@@ -50,6 +50,23 @@ enum SnapshotRenderer {
             }
         }
 
+        // The Files page as a list and as icons. Its view choice is a user
+        // default, put back as it was afterwards.
+        let defaults = UserDefaults.standard
+        let savedView = defaults.object(forKey: "files.view")
+        for mode in [FileView.list, .icons] {
+            defaults.set(mode.rawValue, forKey: "files.view")
+            for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                let router = WorkspaceRouter()
+                router.section = .files
+                render(WorkspaceView().environment(ConduitStore.preview(.connected)).environment(router),
+                       size: CGSize(width: 1000, height: 640), appearance: appearance, titled: true,
+                       to: directory.appendingPathComponent(
+                        "workspace-files-\(mode.rawValue)-\(appearance == .aqua ? "light" : "dark").png"))
+            }
+        }
+        defaults.set(savedView, forKey: "files.view")
+
         render(PhoneWindowView().environment(ConduitStore.preview(.waitingForPhone)),
                size: CGSize(width: 400, height: 820), appearance: .darkAqua, titled: true,
                to: directory.appendingPathComponent("phone-window-waiting.png"))

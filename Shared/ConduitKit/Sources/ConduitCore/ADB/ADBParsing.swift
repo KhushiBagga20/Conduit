@@ -164,4 +164,133 @@ nonisolated enum ADBParsing {
         let text = output.lowercased()
         return text.contains("connected to") && !text.contains("failed") && !text.contains("cannot")
     }
+
+    // MARK: - Android's media index
+
+    /// A file as Android's MediaStore knows it.
+    struct MediaEntry: Sendable, Equatable {
+        enum Kind: Sendable, Equatable { case image, video, other }
+        let id: Int64
+        let kind: Kind
+        /// When the photo or video was taken, or else when the file arrived
+        /// on the phone — the nearest thing Android keeps to a creation date.
+        let created: Date?
+
+        /// MediaProvider serves a cached thumbnail for photos and videos.
+        var thumbnailURI: String? {
+            switch kind {
+            case .image: "content://media/external/images/media/\(id)/thumbnail"
+            case .video: "content://media/external/video/media/\(id)/thumbnail"
+            case .other: nil
+            }
+        }
+    }
+
+    /// One query for a folder. The path comes last, since a file name may
+    /// hold the ", " that separates the other columns. The folder is quoted
+    /// for the phone's shell and, inside that, for SQL.
+    static func mediaIndexCommand(folder: String) -> String {
+        let clause = "_data LIKE '\(folder.replacingOccurrences(of: "'", with: "''"))/%'"
+        return "content query --uri content://media/external/file "
+            + "--projection _id:media_type:date_added:datetaken:_data --where \(PhoneShell.quote(clause))"
+    }
+
+    /// Rows like `Row: 0 _id=12, media_type=1, date_added=1755964978,
+    /// datetaken=1755964977024, _data=/storage/…/IMG_1.jpg`, keyed by path.
+    /// Only files directly in `folder` count; LIKE also matches deeper ones.
+    static func mediaIndex(_ output: String, folder: String) -> [String: MediaEntry] {
+        var entries: [String: MediaEntry] = [:]
+        for raw in output.split(separator: "\n") {
+            let line = String(raw)
+            guard let dataRange = line.range(of: ", _data=") else { continue }
+            let path = String(line[dataRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard (path as NSString).deletingLastPathComponent == folder else { continue }
+
+            var fields: [String: String] = [:]
+            for pair in line[..<dataRange.lowerBound].split(separator: ",") {
+                let parts = pair.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                guard parts.count == 2 else { continue }
+                // The first pair carries the "Row: 0 " prefix.
+                fields[String(parts[0].split(separator: " ").last ?? "")] = parts[1]
+            }
+            guard let id = fields["_id"].flatMap({ Int64($0) }) else { continue }
+            let kind: MediaEntry.Kind = switch fields["media_type"] {
+            case "1": .image
+            case "3": .video
+            default: .other
+            }
+            let taken = fields["datetaken"].flatMap { Double($0) }.map { Date(timeIntervalSince1970: $0 / 1000) }
+            let added = fields["date_added"].flatMap { Double($0) }.map { Date(timeIntervalSince1970: $0) }
+            entries[path] = MediaEntry(id: id, kind: kind, created: taken ?? added)
+        }
+        return entries
+    }
+
+    // MARK: - Wireless readiness
+
+    /// What the phone says, over the cable, about being reached over Wi-Fi.
+    struct WirelessProbe: Sendable, Equatable {
+        let debuggingOn: Bool
+        /// Where Wireless debugging listens; it moves whenever it restarts.
+        let port: UInt16?
+        /// The phone's address on the Wi-Fi network it has joined.
+        let wifiAddress: String?
+    }
+
+    /// One shell command: Wireless debugging's switch, its port, every IPv4
+    /// address with its interface, and the TCP sockets adbd listens on.
+    ///
+    /// MEASURED on a Galaxy S24 Ultra (Android 16): service.adb.tls.port
+    /// stays empty while Wireless debugging listens. adbd runs as the shell
+    /// user (uid 2000), so its listening sockets give the port instead.
+    static let wirelessProbeCommand =
+        "echo \"wd=$(settings get global adb_wifi_enabled)\"; echo \"port=$(getprop service.adb.tls.port)\"; "
+        + "ip -4 -o addr show 2>/dev/null; "
+        + "cat /proc/net/tcp6 /proc/net/tcp 2>/dev/null | awk '$4==\"0A\" && $8==\"2000\" {print \"listen=\" $2}'"
+
+    static func wirelessProbe(_ output: String) -> WirelessProbe {
+        var debuggingOn = false
+        var port: UInt16?
+        var listening: UInt16?
+        var address: String?
+        for raw in output.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("wd=") {
+                debuggingOn = line.dropFirst(3) == "1"
+            } else if line.hasPrefix("port=") {
+                port = UInt16(line.dropFirst(5)).flatMap { $0 > 0 ? $0 : nil }
+            } else if line.hasPrefix("listen="), listening == nil,
+                      let hex = line.split(separator: ":").last, let found = UInt16(hex, radix: 16),
+                      found != HotspotAccess.port {
+                // adb's own TCP port, when armed, is not Wireless debugging's.
+                listening = found
+            } else if address == nil, let found = wifiAddress(inIPLine: line) {
+                address = found
+            }
+        }
+        return WirelessProbe(debuggingOn: debuggingOn, port: port ?? (debuggingOn ? listening : nil), wifiAddress: address)
+    }
+
+    /// `30: wlan0    inet 192.168.31.5/24 brd …` gives 192.168.31.5. Only the
+    /// Wi-Fi client interfaces count — wlan0, wlan1 — not the hotspot's own
+    /// (swlan0, ap0) or mobile data (rmnet).
+    static func wifiAddress(inIPLine line: String) -> String? {
+        let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+        guard fields.count >= 4, fields[2] == "inet" else { return nil }
+        let interface = fields[1]
+        guard interface.hasPrefix("wlan"), interface.dropFirst(4).allSatisfy(\.isNumber) else { return nil }
+        let address = String(fields[3].prefix { $0 != "/" })
+        let octets = address.split(separator: ".")
+        guard octets.count == 4, octets.allSatisfy({ UInt8($0) != nil }) else { return nil }
+        return address
+    }
+
+    /// Whether two IPv4 addresses look like the same network. Only the first
+    /// two numbers are compared: Wi-Fi networks are often wider than a /24,
+    /// and a false "different network" would send someone down the wrong road.
+    static func probablySameNetwork(_ a: String, _ b: String) -> Bool {
+        let left = a.split(separator: "."), right = b.split(separator: ".")
+        guard left.count == 4, right.count == 4 else { return false }
+        return left.prefix(2) == right.prefix(2)
+    }
 }

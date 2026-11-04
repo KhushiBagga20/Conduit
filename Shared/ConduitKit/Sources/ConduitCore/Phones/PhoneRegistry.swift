@@ -56,6 +56,9 @@ nonisolated struct KnownPhone: Codable, Sendable, Equatable {
     /// The port adb's TCP mode was armed on, so the phone can be reached
     /// over its own hotspot. Nil when it was never armed or was turned off.
     var hotspotPort: UInt16?
+    /// Where the phone was on Wi-Fi when last plugged in, so it can be
+    /// reached directly where Bonjour finds nothing.
+    var wireless: WirelessInfo?
 }
 
 enum PhoneRegistry {

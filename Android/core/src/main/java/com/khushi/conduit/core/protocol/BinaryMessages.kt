@@ -85,3 +85,38 @@ data class Vibration(val durationMs: Int, val amplitude: Int) {
         }
     }
 }
+
+object FileType {
+    const val CHUNK = 0
+}
+
+/**
+ * A piece of a file whose `file.offer` was accepted. [transferId] is an
+ * unsigned 32-bit number on the wire. The offset is where the bytes belong;
+ * TCP keeps them in order, so it only catches bugs.
+ */
+class FileChunk(val transferId: Int, val offset: Long, val bytes: ByteArray) {
+
+    fun toFrame(): Frame = frame(transferId, offset, bytes, bytes.size)
+
+    override fun equals(other: Any?): Boolean = other is FileChunk && other.transferId == transferId &&
+        other.offset == offset && other.bytes.contentEquals(bytes)
+
+    override fun hashCode(): Int = (transferId * 31 + offset.hashCode()) * 31 + bytes.contentHashCode()
+
+    companion object {
+        const val HEADER_SIZE = 12
+
+        /** The first [length] bytes of [buffer], without copying them twice. */
+        fun frame(transferId: Int, offset: Long, buffer: ByteArray, length: Int): Frame =
+            Frame(LinkChannel.FILE, FileType.CHUNK,
+                ByteBuffer.allocate(HEADER_SIZE + length).putInt(transferId).putLong(offset).put(buffer, 0, length).array())
+
+        fun from(frame: Frame): FileChunk? {
+            if (frame.channel != LinkChannel.FILE || frame.type != FileType.CHUNK) return null
+            if (frame.payload.size < HEADER_SIZE) return null
+            val body = ByteBuffer.wrap(frame.payload)
+            return FileChunk(body.int, body.long, frame.payload.copyOfRange(HEADER_SIZE, frame.payload.size))
+        }
+    }
+}

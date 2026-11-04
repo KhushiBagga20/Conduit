@@ -24,6 +24,8 @@ import Foundation
 
 nonisolated enum ADBSync {
 
+    typealias MediaInfo = ADBParsing.MediaEntry
+
     static let serverPort: UInt16 = 5037
     static let maximumChunk = 64 * 1024
     static let maximumPath = 1024

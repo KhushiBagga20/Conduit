@@ -37,7 +37,8 @@ public enum LinkChannel: UInt8, Sendable, CaseIterable {
         case .control: return [ControlType.handshake.rawValue, ControlType.envelope.rawValue]
         case .input:   return Set(InputType.allCases.map(\.rawValue))
         case .haptic:  return [HapticType.vibrate.rawValue]
-        case .sensor, .media, .file: return []
+        case .file:    return Set(FileType.allCases.map(\.rawValue))
+        case .sensor, .media: return []
         }
     }
 }

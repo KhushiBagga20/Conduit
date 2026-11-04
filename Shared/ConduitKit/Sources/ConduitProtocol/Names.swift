@@ -35,6 +35,9 @@ public struct ActionName: RawRepresentable, Hashable, Sendable, CustomStringConv
     public static let notificationSync = ActionName("notification.sync")
     public static let notificationDismiss = ActionName("notification.dismiss")
     public static let notificationOpen = ActionName("notification.open")
+    public static let fileOffer = ActionName("file.offer")
+    public static let fileFinish = ActionName("file.finish")
+    public static let fileCancel = ActionName("file.cancel")
 }
 
 // MARK: - Events

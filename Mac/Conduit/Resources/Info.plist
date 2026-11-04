@@ -8,10 +8,17 @@
 
 	  _adb-tls-connect._tcp is what phones with Wireless debugging on
 	  advertise; Conduit browses for it to reconnect known phones.
+
+	  _conduit._tcp is Conduit Link's own advert, how Conduit for Android
+	  finds this Mac on whatever network they share. MEASURED: left out of
+	  this list, macOS refused to advertise it (NoAuth) on every launch, so
+	  a phone found the Mac over Wi-Fi only after the cable had told it the
+	  Mac's address.
 	-->
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_adb-tls-connect._tcp</string>
+		<string>_conduit._tcp</string>
 	</array>
 </dict>
 </plist>

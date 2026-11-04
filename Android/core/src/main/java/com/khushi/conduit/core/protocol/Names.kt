@@ -25,6 +25,9 @@ object ActionName {
     const val NOTIFICATION_SYNC = "notification.sync"
     const val NOTIFICATION_DISMISS = "notification.dismiss"
     const val NOTIFICATION_OPEN = "notification.open"
+    const val FILE_OFFER = "file.offer"
+    const val FILE_FINISH = "file.finish"
+    const val FILE_CANCEL = "file.cancel"
 }
 
 object EventName {

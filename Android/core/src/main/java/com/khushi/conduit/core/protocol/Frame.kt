@@ -27,7 +27,8 @@ enum class LinkChannel(val value: Int) {
             CONTROL -> setOf(ControlType.HANDSHAKE, ControlType.ENVELOPE)
             INPUT -> InputType.entries.map { it.value }.toSet()
             HAPTIC -> setOf(HapticType.VIBRATE)
-            SENSOR, MEDIA, FILE -> emptySet()
+            FILE -> setOf(FileType.CHUNK)
+            SENSOR, MEDIA -> emptySet()
         }
 
     companion object {

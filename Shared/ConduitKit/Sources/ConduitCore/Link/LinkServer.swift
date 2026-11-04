@@ -43,6 +43,7 @@ final class LinkServer {
     var onReady: (LinkPeer) -> Void = { _ in }
     var onEnvelope: (Envelope, LinkPeer) -> Void = { _, _ in }
     var onInput: (InputEvent, LinkPeer) -> Void = { _, _ in }
+    var onFile: (FileChunk, LinkPeer) -> Void = { _, _ in }
     var onClosed: (LinkPeer?, ProtocolError?) -> Void = { _, _ in }
 
     /// `port` 0 takes any free port.
@@ -196,6 +197,7 @@ final class LinkServer {
         }
         connection.onEnvelope = { [weak self] envelope, peer in self?.onEnvelope(envelope, peer) }
         connection.onInput = { [weak self] event, peer in self?.onInput(event, peer) }
+        connection.onFile = { [weak self] chunk, peer in self?.onFile(chunk, peer) }
         connection.onClosed = { [weak self] peer, error in
             guard let self else { return }
             connections[key] = nil

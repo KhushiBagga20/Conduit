@@ -13,10 +13,15 @@ connection.
 > a Galaxy S24 Ultra, including carrying on over Wi-Fi when the cable is
 > pulled. Conduit for Android pairs with the Mac over Conduit Link, shares
 > links both ways, rings the Mac from the phone, and lets the Mac ask for
-> its hotspot over Bluetooth. Conduit for Mac browses the phone's storage and
-> moves files and folders both ways over adb — checked byte for byte on the
-> phone, at the same speed as adb's own tool — and edits phone files in place,
-> writing each save from the Mac app back to the phone.
+> its hotspot over Bluetooth, and sends files to the Mac — from its share
+> sheet or Home, over Conduit Link, each checked with SHA-256 (40 MB in about
+> a second over USB). Conduit for Mac browses the phone's storage as a list
+> or as icons with the phone's own photo and video thumbnails, sorted by date
+> created or modified, and moves files and folders both ways over adb —
+> checked byte for byte on the phone, at the same speed as adb's own tool —
+> and edits phone files in place, writing each save from the Mac app back to
+> the phone. Dragging files out of it into Finder is built but not yet tried
+> by hand.
 >
 > Built but not yet seen working end to end: phone notifications on the
 > Mac (Android has not yet let a sideloaded Conduit read notifications),

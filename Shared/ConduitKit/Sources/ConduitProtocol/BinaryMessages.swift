@@ -108,6 +108,42 @@ public struct Vibration: Sendable, Equatable {
     }
 }
 
+// MARK: - File (phone → Mac)
+
+public enum FileType: UInt8, Sendable, CaseIterable {
+    case chunk = 0
+}
+
+/// A piece of a file whose `file.offer` was accepted. The offset is where
+/// the bytes belong; TCP keeps them in order, so it only catches bugs.
+public struct FileChunk: Sendable, Equatable {
+    public static let headerSize = 12
+
+    public var transferID: UInt32
+    public var offset: UInt64
+    public var bytes: Data
+
+    public init(transferID: UInt32, offset: UInt64, bytes: Data) {
+        self.transferID = transferID
+        self.offset = offset
+        self.bytes = bytes
+    }
+
+    public var frame: Frame {
+        var w = ByteWriter()
+        w.u32(transferID)
+        w.u64(offset)
+        return Frame(channel: .file, type: FileType.chunk.rawValue, payload: w.data + bytes)
+    }
+
+    public init?(frame: Frame) {
+        guard frame.channel == .file, frame.type == FileType.chunk.rawValue else { return nil }
+        var r = ByteReader(frame.payload)
+        guard let transferID = r.u32(), let offset = r.u64() else { return nil }
+        self.init(transferID: transferID, offset: offset, bytes: frame.payload.dropFirst(Self.headerSize))
+    }
+}
+
 // MARK: - Big-endian helpers
 
 struct ByteWriter {
@@ -118,6 +154,14 @@ struct ByteWriter {
         data.append(UInt8(truncatingIfNeeded: v))
     }
     mutating func i16(_ v: Int16) { u16(UInt16(bitPattern: v)) }
+    mutating func u32(_ v: UInt32) {
+        u16(UInt16(truncatingIfNeeded: v >> 16))
+        u16(UInt16(truncatingIfNeeded: v))
+    }
+    mutating func u64(_ v: UInt64) {
+        u32(UInt32(truncatingIfNeeded: v >> 32))
+        u32(UInt32(truncatingIfNeeded: v))
+    }
 }
 
 /// Every read is bounds-checked and returns nil rather than trapping: bytes
@@ -146,5 +190,15 @@ struct ByteReader {
 
     mutating func i16() -> Int16? {
         u16().map { Int16(bitPattern: $0) }
+    }
+
+    mutating func u32() -> UInt32? {
+        guard let high = u16(), let low = u16() else { return nil }
+        return UInt32(high) << 16 | UInt32(low)
+    }
+
+    mutating func u64() -> UInt64? {
+        guard let high = u32(), let low = u32() else { return nil }
+        return UInt64(high) << 32 | UInt64(low)
     }
 }

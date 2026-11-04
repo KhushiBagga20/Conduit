@@ -74,8 +74,8 @@ struct SettingsForm: View {
 
             Section("Connection") {
                 Toggle(isOn: binding(\.autoConnectWireless)) {
-                    Text("Reconnect over Wireless debugging")
-                    Text("Keeps phones this Mac knows connected over Wi-Fi, so mirroring survives unplugging.")
+                    Text("Keep phones connected without the cable")
+                    Text("Turns on Wireless debugging while a phone is plugged in, and reconnects to it over Wi-Fi when you unplug.")
                 }
             }
 

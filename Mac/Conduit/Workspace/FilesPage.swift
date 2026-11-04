@@ -3,10 +3,11 @@
 //  Conduit
 //
 //  The phone's files, the way Finder shows a disk: a folder at a time,
-//  folders first. Drop files from Finder to send them to the phone; select
-//  and Download to bring them here; double-click a file to edit it in its
-//  Mac app, with each save written back to the phone. Over adb — USB, Wi-Fi
-//  debugging or the phone's hotspot. Nothing else is ever overwritten.
+//  folders first, as a list or as icons with the phone's own thumbnails.
+//  Drop files from Finder to send them to the phone; drag them out, or
+//  select and Download, to bring them here; double-click a file to edit it
+//  in its Mac app, with each save written back to the phone. Over adb — USB,
+//  Wi-Fi debugging or the phone's hotspot. Nothing else is ever overwritten.
 //
 
 import AppKit
@@ -23,6 +24,9 @@ struct FilesPage: View {
     @State private var newFolderName = ""
     @State private var confirmingDelete = false
     @State private var dropTargeted = false
+    @AppStorage("files.sort") private var sortKey = FileSort.created
+    @AppStorage("files.ascending") private var ascending = false
+    @AppStorage("files.view") private var viewMode = FileView.list
 
     private static let places: [(title: String, folder: String, symbol: String)] = [
         ("Phone Storage", "", "iphone"),
@@ -35,25 +39,26 @@ struct FilesPage: View {
     ]
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
             if store.files.isAvailable {
-                VStack(spacing: 0) {
-                    table
-                    if !store.files.editing.isEmpty {
-                        Divider()
-                        EditingStrip()
-                    }
-                    if !store.files.transfers.isEmpty {
-                        Divider()
-                        TransfersStrip()
-                    }
+                browser
+                if !store.files.editing.isEmpty {
+                    Divider()
+                    EditingStrip()
                 }
             } else {
                 ContentUnavailableView {
                     Label("Files", systemImage: "folder")
                 } description: {
-                    Text("Files move over adb. Plug the phone in, or connect it over Wi-Fi debugging — or over its own hotspot, from Devices.")
+                    Text("Files move over adb. Plug the phone in, or connect it over Wi-Fi debugging — or over its own hotspot, from Devices. Files sent from the phone's Conduit app arrive without it.")
                 }
+                .frame(maxHeight: .infinity)
+            }
+            // Files the phone sends over Conduit Link show here too, with or
+            // without adb.
+            if !store.files.transfers.isEmpty {
+                Divider()
+                TransfersStrip()
             }
         }
         .navigationTitle(folderTitle)
@@ -78,49 +83,14 @@ struct FilesPage: View {
         }
     }
 
-    // MARK: - The list
+    // MARK: - The folder
 
-    private var table: some View {
-        Table(store.files.entries, selection: $selection) {
-            TableColumn("Name") { file in
-                Label {
-                    Text(file.name).lineLimit(1)
-                } icon: {
-                    Image(systemName: file.isFolder ? "folder.fill" : Self.symbol(for: file.name))
-                        .foregroundStyle(file.isFolder ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                }
+    private var browser: some View {
+        Group {
+            switch viewMode {
+            case .list: list
+            case .icons: icons
             }
-            TableColumn("Size") { file in
-                Text(file.isFolder ? "—" : Int64(clamping: file.size).formatted(.byteCount(style: .file)))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            .width(min: 70, ideal: 90, max: 130)
-            TableColumn("Date Modified") { file in
-                Text(file.modified, format: .dateTime.day().month(.abbreviated).year().hour().minute())
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 130, ideal: 170, max: 230)
-        }
-        .contextMenu(forSelectionType: PhoneFile.ID.self) { ids in
-            let files = store.files.entries.filter { ids.contains($0.id) }
-            if files.count == 1, let file = files.first {
-                Button("Open") { open(file) }
-                if !file.isFolder {
-                    Button("Open a Copy") { store.commands?.openPhoneFile(file) }
-                }
-            }
-            if !files.isEmpty {
-                Button("Download") { download(files) }
-                Divider()
-                Button("Delete…", role: .destructive) {
-                    selection = ids
-                    confirmingDelete = true
-                }
-            }
-        } primaryAction: { ids in
-            guard ids.count == 1, let file = store.files.entries.first(where: { ids.contains($0.id) }) else { return }
-            open(file)
         }
         .dropDestination(for: URL.self) { urls, _ in
             let files = urls.filter(\.isFileURL)
@@ -128,26 +98,148 @@ struct FilesPage: View {
             store.commands?.uploadToPhone(files)
             return true
         } isTargeted: { dropTargeted = $0 }
-        .overlay {
-            if dropTargeted {
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.accentColor, lineWidth: 3)
-                    .padding(4)
-                    .allowsHitTesting(false)
-            } else if store.files.isLoading && store.files.entries.isEmpty {
-                ProgressView()
-            } else if let error = store.files.error {
-                ContentUnavailableView {
-                    Label("Couldn't Open This Folder", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(error)
-                } actions: {
-                    Button("Try Again") { store.commands?.refreshPhoneFolder() }
+        .overlay { overlay }
+    }
+
+    /// Folders stay on top, as in Finder; within them, the chosen order.
+    private var sortedEntries: [PhoneFile] {
+        let sorted = store.files.entries.sorted(using: comparator)
+        return sorted.filter(\.isFolder) + sorted.filter { !$0.isFolder }
+    }
+
+    private var comparator: KeyPathComparator<PhoneFile> {
+        let order: SortOrder = ascending ? .forward : .reverse
+        switch sortKey {
+        case .name: return KeyPathComparator(\.name, comparator: .localizedStandard, order: order)
+        case .created: return KeyPathComparator(\.createdOrModified, order: order)
+        case .modified: return KeyPathComparator(\.modified, order: order)
+        case .size: return KeyPathComparator(\.size, order: order)
+        }
+    }
+
+    /// The table's column headers and the Sort By menu set the same order.
+    private var sortOrder: Binding<[KeyPathComparator<PhoneFile>]> {
+        Binding(
+            get: { [comparator] },
+            set: { orders in
+                guard let first = orders.first else { return }
+                ascending = first.order == .forward
+                sortKey = FileSort.allCases.first { $0.keyPath == first.keyPath } ?? sortKey
+            })
+    }
+
+    private var list: some View {
+        Table(of: PhoneFile.self, selection: $selection, sortOrder: sortOrder) {
+            TableColumn("Name", value: \.name, comparator: .localizedStandard) { file in
+                HStack(spacing: 8) {
+                    FileThumbnail(file: file, size: 26)
+                    Text(file.name).lineLimit(1)
                 }
-            } else if store.files.entries.isEmpty && !store.files.isLoading {
-                ContentUnavailableView("Empty Folder", systemImage: "folder",
-                                       description: Text("Drop files here to send them to the phone."))
             }
+            TableColumn("Date Created", value: \.createdOrModified) { file in
+                Text(file.createdOrModified, format: .dateTime.day().month(.abbreviated).year().hour().minute())
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 130, ideal: 160, max: 220)
+            TableColumn("Date Modified", value: \.modified) { file in
+                Text(file.modified, format: .dateTime.day().month(.abbreviated).year().hour().minute())
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 130, ideal: 160, max: 220)
+            TableColumn("Size", value: \.size) { file in
+                Text(file.isFolder ? "—" : Int64(clamping: file.size).formatted(.byteCount(style: .file)))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            .width(min: 70, ideal: 90, max: 130)
+        } rows: {
+            ForEach(sortedEntries) { file in
+                TableRow(file)
+                    .draggable(dragItem(for: file))
+            }
+        }
+        .contextMenu(forSelectionType: PhoneFile.ID.self) { ids in
+            menu(for: ids)
+        } primaryAction: { ids in
+            guard ids.count == 1, let file = store.files.entries.first(where: { ids.contains($0.id) }) else { return }
+            open(file)
+        }
+    }
+
+    private var icons: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 136), spacing: 12)], spacing: 16) {
+                ForEach(sortedEntries) { file in
+                    FileTile(file: file, isSelected: selection.contains(file.id))
+                        .onTapGesture(count: 2) { open(file) }
+                        .onTapGesture { select(file) }
+                        .contextMenu { menu(for: selection.contains(file.id) ? selection : [file.id]) }
+                        .draggable(dragItem(for: file))
+                }
+            }
+            .padding(16)
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+        .onTapGesture { selection.removeAll() }
+    }
+
+    /// A click selects; Command-click adds to or takes from the selection.
+    private func select(_ file: PhoneFile) {
+        if NSEvent.modifierFlags.contains(.command) {
+            if selection.contains(file.id) { selection.remove(file.id) } else { selection.insert(file.id) }
+        } else {
+            selection = [file.id]
+        }
+    }
+
+    @ViewBuilder
+    private func menu(for ids: Set<PhoneFile.ID>) -> some View {
+        let files = store.files.entries.filter { ids.contains($0.id) }
+        if files.count == 1, let file = files.first {
+            Button("Open") { open(file) }
+            if !file.isFolder {
+                Button("Open a Copy") { store.commands?.openPhoneFile(file) }
+            }
+        }
+        if !files.isEmpty {
+            Button("Download") { download(files) }
+            Divider()
+            Button("Delete…", role: .destructive) {
+                selection = ids
+                confirmingDelete = true
+            }
+        }
+    }
+
+    /// Dropped in Finder, a file is brought over first and then handed on.
+    private func dragItem(for file: PhoneFile) -> PhoneFileDrag {
+        let store = store
+        return PhoneFileDrag(file: file) { @MainActor file in
+            guard let commands = store.commands else { throw CocoaError(.fileNoSuchFile) }
+            return try await commands.exportPhoneFile(file)
+        }
+    }
+
+    @ViewBuilder
+    private var overlay: some View {
+        if dropTargeted {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.accentColor, lineWidth: 3)
+                .padding(4)
+                .allowsHitTesting(false)
+        } else if store.files.isLoading && store.files.entries.isEmpty {
+            ProgressView()
+        } else if let error = store.files.error {
+            ContentUnavailableView {
+                Label("Couldn't Open This Folder", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("Try Again") { store.commands?.refreshPhoneFolder() }
+            }
+        } else if store.files.entries.isEmpty && !store.files.isLoading {
+            ContentUnavailableView("Empty Folder", systemImage: "folder",
+                                   description: Text("Drop files here to send them to the phone."))
         }
     }
 
@@ -170,6 +262,30 @@ struct FilesPage: View {
             }
             .disabled(!store.files.isAvailable)
             .help("Jump to a common folder")
+        }
+        ToolbarItem {
+            Picker("View", selection: $viewMode) {
+                Label("List", systemImage: "list.bullet").tag(FileView.list)
+                Label("Icons", systemImage: "square.grid.2x2").tag(FileView.icons)
+            }
+            .pickerStyle(.segmented)
+            .help("Show the folder as a list or as icons")
+        }
+        ToolbarItem {
+            Menu {
+                Picker("Sort By", selection: $sortKey) {
+                    ForEach(FileSort.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.inline)
+                Picker("Order", selection: $ascending) {
+                    Text(sortKey.descendingTitle).tag(false)
+                    Text(sortKey.ascendingTitle).tag(true)
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label("Sort By", systemImage: "arrow.up.arrow.down")
+            }
+            .help("Sort by name, date created, date modified or size")
         }
         ToolbarItemGroup {
             Button { newFolderName = ""; naming = true } label: { Label("New Folder", systemImage: "folder.badge.plus") }
@@ -240,7 +356,12 @@ struct FilesPage: View {
         store.commands?.uploadToPhone(panel.urls)
     }
 
-    private static func symbol(for name: String) -> String {
+    static func isVideo(_ name: String) -> Bool {
+        guard let type = UTType(filenameExtension: (name as NSString).pathExtension) else { return false }
+        return type.conforms(to: .movie) || type.conforms(to: .video)
+    }
+
+    static func symbol(for name: String) -> String {
         guard let type = UTType(filenameExtension: (name as NSString).pathExtension) else { return "doc" }
         if type.conforms(to: .image) { return "photo" }
         if type.conforms(to: .movie) || type.conforms(to: .video) { return "film" }
@@ -388,5 +509,143 @@ private struct TransferRow: View {
         let done = Int64(clamping: transfer.bytesDone).formatted(.byteCount(style: .file))
         guard transfer.bytesTotal > 0 else { return done }
         return "\(done) of \(Int64(clamping: transfer.bytesTotal).formatted(.byteCount(style: .file)))"
+    }
+}
+
+// MARK: - Sorting and views
+
+enum FileSort: String, CaseIterable {
+    case name, created, modified, size
+
+    var title: String {
+        switch self {
+        case .name: "Name"
+        case .created: "Date Created"
+        case .modified: "Date Modified"
+        case .size: "Size"
+        }
+    }
+
+    var ascendingTitle: String {
+        switch self {
+        case .name: "A to Z"
+        case .created, .modified: "Oldest First"
+        case .size: "Smallest First"
+        }
+    }
+
+    var descendingTitle: String {
+        switch self {
+        case .name: "Z to A"
+        case .created, .modified: "Newest First"
+        case .size: "Largest First"
+        }
+    }
+
+    var keyPath: PartialKeyPath<PhoneFile> {
+        switch self {
+        case .name: \PhoneFile.name
+        case .created: \PhoneFile.createdOrModified
+        case .modified: \PhoneFile.modified
+        case .size: \PhoneFile.size
+        }
+    }
+}
+
+enum FileView: String {
+    case list, icons
+}
+
+/// A phone file on its way out of Conduit in a drag. Finder asks for the
+/// file only when it is dropped; it is brought over then.
+struct PhoneFileDrag: Transferable {
+    let file: PhoneFile
+    let export: @MainActor @Sendable (PhoneFile) async throws -> URL
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .item) { drag in
+            SentTransferredFile(try await drag.export(drag.file))
+        }
+        .suggestedFileName { $0.file.name }
+    }
+}
+
+/// Android's own thumbnail for a photo or video; a symbol for anything else.
+struct FileThumbnail: View {
+    @Environment(ConduitStore.self) private var store
+    let file: PhoneFile
+    let size: CGFloat
+
+    private static let images = NSCache<NSString, NSImage>()
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: file.isFolder ? "folder.fill" : FilesPage.symbol(for: file.name))
+                    .resizable()
+                    .scaledToFit()
+                    .padding(size * 0.18)
+                    .foregroundStyle(file.isFolder ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: max(3, size * 0.1), style: .continuous))
+        .overlay(alignment: .bottomTrailing) {
+            if image != nil, FilesPage.isVideo(file.name) {
+                Image(systemName: "play.fill")
+                    .font(.system(size: max(7, size * 0.16)))
+                    .foregroundStyle(.white)
+                    .padding(max(2, size * 0.05))
+                    .background(.black.opacity(0.45), in: Circle())
+                    .padding(max(2, size * 0.05))
+            }
+        }
+        .task(id: file.path) {
+            guard file.hasThumbnail else { return }
+            store.commands?.requestThumbnail(for: file)
+            // Held until the row leaves the screen, which cancels the task.
+            try? await Task.sleep(for: .seconds(3600))
+            if Task.isCancelled { store.commands?.cancelThumbnail(for: file) }
+        }
+    }
+
+    private var image: NSImage? {
+        guard let data = store.files.thumbnails[file.path] else { return nil }
+        let key = "\(file.path)|\(data.count)" as NSString
+        if let cached = Self.images.object(forKey: key) { return cached }
+        guard let image = NSImage(data: data) else { return nil }
+        Self.images.setObject(image, forKey: key)
+        return image
+    }
+}
+
+/// One item in the icon view.
+private struct FileTile: View {
+    let file: PhoneFile
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 6) {
+            FileThumbnail(file: file, size: 100)
+                .padding(4)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isSelected ? Color.secondary.opacity(0.25) : .clear))
+            Text(file.name)
+                .font(.caption)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .foregroundStyle(isSelected ? Color.white : Color.primary)
+                .background(RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(isSelected ? Color.accentColor : .clear))
+        }
+        .frame(width: 136)
+        .contentShape(Rectangle())
     }
 }

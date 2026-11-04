@@ -43,6 +43,45 @@ public nonisolated enum HotspotAccess {
     public static let port: UInt16 = 5555
 }
 
+/// What this Mac last learned over the cable about reaching the phone over
+/// Wi-Fi: whether Wireless debugging is on, where it listens, and where the
+/// phone is on its network.
+public nonisolated struct WirelessInfo: Sendable, Equatable, Codable {
+    public var debuggingOn: Bool
+    public var address: String?
+    /// Wireless debugging's port. It moves whenever Wireless debugging
+    /// restarts, so it is a first guess, not a promise.
+    public var port: UInt16?
+    public var checked: Date
+
+    public init(debuggingOn: Bool, address: String?, port: UInt16?, checked: Date) {
+        self.debuggingOn = debuggingOn
+        self.address = address
+        self.port = port
+        self.checked = checked
+    }
+}
+
+/// Whether the phone can be used without the cable right now, and if not,
+/// the reason a person can act on.
+public nonisolated enum WifiReachability: Sendable, Equatable {
+    /// Not plugged in since Conduit began checking, so nothing is known yet.
+    case unknown
+    case connected
+    case notOnWiFi
+    case debuggingOff
+    /// Switched on, but not listening: Android waits for this Wi-Fi network
+    /// to be allowed on the phone before it starts.
+    case waitingForApproval
+    /// Phone and Mac look to be on different networks.
+    case differentNetwork(phone: String, mac: String)
+    /// On the same network; connecting.
+    case trying
+    /// On the same network, but nothing gets through — usually a network
+    /// that keeps its devices from reaching each other.
+    case unreachable
+}
+
 /// Conduit for Android on this phone, as seen over adb.
 public nonisolated enum CompanionAppStatus: Sendable, Equatable {
     case unknown
@@ -72,6 +111,8 @@ public nonisolated struct PhoneDevice: Identifiable, Sendable, Equatable {
     public var hotspotArmed: Bool
     /// This Mac is on the phone's hotspot and connected through it.
     public var isOverHotspot: Bool
+    /// Whether it works without the cable, and why not.
+    public var wifi: WifiReachability = .unknown
 
     public init(id: String, name: String, model: String? = nil, manufacturer: String? = nil,
                 osVersion: String? = nil, connection: PhoneConnection, transports: Set<PhoneTransport> = [],

@@ -50,7 +50,7 @@ big-endian.
 | 2 | `sensor` | phone → Mac | reserved |
 | 3 | `haptic` | Mac → phone | §7 |
 | 4 | `media` | both | reserved (app-side camera, audio) |
-| 5 | `file` | both | reserved (file transfer) |
+| 5 | `file` | phone → Mac | §7 |
 
 - **Size limits.** A control payload may be at most 1 MiB; other channels
   at most 4 MiB. A larger length is a protocol error and closes the
@@ -280,6 +280,9 @@ Notification { key, appID, appName, title?, text?, postedAt, clearable: Bool,
 | `call.dial` | command | Mac → phone | `{ number }` |
 | `call.mute` | command | Mac → phone | `{ muted }` — may fail with `unsupported` |
 | `mac.find` | command | phone → Mac | `{}` — the Mac plays a sound until dismissed |
+| `file.offer` | command | phone → Mac | `{ transferID, name, size, type?, index?, count? }` |
+| `file.finish` | command | phone → Mac | `{ transferID, sha256 }` |
+| `file.cancel` | command | both | `{ transferID }` |
 
 **Notifications.** The phone decides what leaves it. It never sends an
 ongoing notification (media players, foreground services), a group summary,
@@ -309,6 +312,28 @@ background, shows a notification that opens it. A receiver set not to take
 links, or with no way to show one, answers `permission_denied`. Neither side
 keeps or logs the link; the interfaces show only its site.
 
+**Files.** The phone sends one file at a time. `file.offer` names it and
+gives its exact size in bytes; `transferID` is an unsigned 32-bit number the
+phone chooses, unique on the connection; `index` and `count` place it in what
+the person sent together, so the Mac can say "sent 12 files" once. Only after
+the Mac answers success does the phone send the bytes, in order, as `chunk`
+frames on the file channel (§7) of at most 256 KiB, then `file.finish` with
+the SHA-256 of the whole file in lowercase hex. The Mac answers success only
+once every byte is written and the hash matches; otherwise it discards what
+it has and answers `invalid_request`. The phone keeps no more than a few
+chunks queued, so a large file never sits in memory, and trackpad input
+still goes out between them.
+
+The Mac decides what the name may mean: it removes path separators, control
+characters and leading dots, so a name can neither leave its folder nor hide,
+and never replaces a file already there ("photo 2.jpg"). Until a file is
+finished it is written under a hidden temporary name, so a half-sent file
+never looks like a whole one. Either side may send `file.cancel`: the phone
+when the person stops it, the Mac when it cannot keep the file (a disk full,
+chunks out of order or past the offered size); chunks still in flight after
+a cancel are dropped. A Mac short of space refuses the offer. Neither side
+logs a file's name — only that a file of so many bytes came.
+
 ## 7. Binary channels
 
 Same layouts as the measured trackpad prototype.
@@ -332,6 +357,17 @@ stuck mouse button.
 | Type | Name | Body |
 |---|---|---|
 | 0 | vibrate | `durationMs u16`, `amplitude u8` (1–255) |
+
+**`file` (5), phone → Mac.** Pieces of a file whose `file.offer` was
+accepted (§6 Files).
+
+| Type | Name | Body |
+|---|---|---|
+| 0 | chunk | `transferID u32`, `offset u64`, then the bytes |
+
+`offset` is where the bytes belong in the file. TCP keeps them in order, so
+a chunk at any other offset than the next one expected is a bug, and the Mac
+cancels the file.
 
 ## 8. Errors
 

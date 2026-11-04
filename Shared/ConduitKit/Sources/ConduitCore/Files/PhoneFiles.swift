@@ -26,6 +26,13 @@ final class PhoneFiles {
     private let adb: ADB
     private let state: FilesState
     private var serial: String?
+    /// The phone's hardware serial, for thumbnails kept on disk.
+    private var phoneID: String?
+    /// What Android's media index said about the folder open now.
+    private var media: [String: ADBSync.MediaInfo] = [:]
+    private var thumbnailQueue: [String] = []
+    private var thumbnailsInFlight: Set<String> = []
+    private static let thumbnailConcurrency = 4
     private var useV2: [String: Bool] = [:]
     private var listing: Task<Void, Never>?
     private var queue: [Job] = []
@@ -81,9 +88,10 @@ final class PhoneFiles {
 
     /// Browse this phone, or nothing with nil. A cable pulled and Wi-Fi
     /// taking over is a new serial for the same phone; the folder stays.
-    func use(serial: String?) {
+    func use(serial: String?, phoneID: String? = nil) {
         guard serial != self.serial else { return }
         self.serial = serial
+        self.phoneID = phoneID ?? self.phoneID
         state.isAvailable = serial != nil
         guard let serial else {
             listing?.cancel()
@@ -110,15 +118,21 @@ final class PhoneFiles {
         state.error = nil
         listing?.cancel()
         let v2 = useV2[serial] ?? false
+        let adb = self.adb
+        if folderChanged(to: folder) {
+            thumbnailQueue.removeAll()
+            state.thumbnails.removeAll()
+        }
 
         listing = Task { [weak self] in
-            let result = await Task.detached { () -> Result<[PhoneFile], Error> in
-                Result { try Self.read(folder, serial: serial, v2: v2) }
+            let result = await Task.detached { () -> Result<([PhoneFile], [String: ADBSync.MediaInfo]), Error> in
+                Result { try Self.read(folder, serial: serial, v2: v2, adb: adb) }
             }.value
             guard let self, !Task.isCancelled, state.folder == folder else { return }
             state.isLoading = false
             switch result {
-            case .success(let files):
+            case .success(let (files, index)):
+                media = index
                 state.entries = files
             case .failure(let error):
                 state.entries = []
@@ -131,12 +145,22 @@ final class PhoneFiles {
         open(state.folder)
     }
 
+    private var shownFolder: String?
+
+    private func folderChanged(to folder: String) -> Bool {
+        defer { shownFolder = folder }
+        return shownFolder != folder
+    }
+
     /// A folder's contents: folders first, then by name, hidden files left
     /// out as Finder leaves them out. Links (Android has a few) are followed
     /// to find out whether they are folders.
-    nonisolated private static func read(_ folder: String, serial: String, v2: Bool) throws -> [PhoneFile] {
+    nonisolated private static func read(_ folder: String, serial: String, v2: Bool,
+                                         adb: ADB) throws -> ([PhoneFile], [String: ADBSync.MediaInfo]) {
         let connection = try ADBSyncConnection(serial: serial, useV2: v2)
         defer { connection.close() }
+        // One query for the folder: dates taken and which files have thumbnails.
+        let index = adb.mediaIndex(serial: serial, folder: folder)
         let files: [PhoneFile] = try connection.list(folder).compactMap { entry in
             guard !entry.name.hasPrefix(".") else { return nil }
             let path = folder == "/" ? "/\(entry.name)" : "\(folder)/\(entry.name)"
@@ -147,11 +171,98 @@ final class PhoneFiles {
                 size = target.size
             }
             guard kind == .file || kind == .directory || kind == .link else { return nil }
+            let known = index[path]
             return PhoneFile(path: path, name: entry.name, isFolder: kind != .file, size: size,
-                             modified: Date(timeIntervalSince1970: TimeInterval(entry.modified)))
+                             modified: Date(timeIntervalSince1970: TimeInterval(entry.modified)),
+                             created: known?.created, hasThumbnail: known?.thumbnailURI != nil)
         }
-        return files.sorted {
+        let sorted = files.sorted {
             $0.isFolder != $1.isFolder ? $0.isFolder : $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        return (sorted, index)
+    }
+
+    // MARK: - Thumbnails
+
+    /// Fetch one thumbnail, a few at a time. Android serves them from its own
+    /// cache, so a photo of many megabytes costs a few dozen kilobytes; they
+    /// are kept on disk too, by the file's identity in Android's index and
+    /// its modification time, so a changed file gets a new one.
+    func requestThumbnail(for file: PhoneFile) {
+        let path = file.path
+        guard file.hasThumbnail, state.thumbnails[path] == nil, !thumbnailsInFlight.contains(path),
+              !thumbnailQueue.contains(path), let entry = media[path] else { return }
+        if let cached = try? Data(contentsOf: thumbnailCacheURL(entry, modified: file.modified)) {
+            state.thumbnails[path] = cached
+            return
+        }
+        thumbnailQueue.append(path)
+        pumpThumbnails()
+    }
+
+    /// Scrolling past thousands of photos queues thousands of requests; the
+    /// ones no longer on screen are dropped before they are sent.
+    func cancelThumbnail(for file: PhoneFile) {
+        thumbnailQueue.removeAll { $0 == file.path }
+    }
+
+    private func pumpThumbnails() {
+        while thumbnailsInFlight.count < Self.thumbnailConcurrency, let serial, !thumbnailQueue.isEmpty {
+            // The newest requests first: they are the rows on screen now.
+            let path = thumbnailQueue.removeLast()
+            guard let entry = media[path], let file = state.entries.first(where: { $0.path == path }) else { continue }
+            thumbnailsInFlight.insert(path)
+            let adb = self.adb
+            let cacheURL = thumbnailCacheURL(entry, modified: file.modified)
+            Task { [weak self] in
+                let data = await Task.detached { adb.thumbnail(serial: serial, entry: entry) }.value
+                guard let self else { return }
+                thumbnailsInFlight.remove(path)
+                if let data, media[path] == entry {
+                    state.thumbnails[path] = data
+                    try? FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(),
+                                                             withIntermediateDirectories: true)
+                    try? data.write(to: cacheURL)
+                }
+                pumpThumbnails()
+            }
+        }
+    }
+
+    private func thumbnailCacheURL(_ entry: ADBSync.MediaInfo, modified: Date) -> URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("com.khushi.Conduit/Thumbnails/\(phoneID ?? "phone")", isDirectory: true)
+            .appendingPathComponent("\(entry.id)-\(Int(modified.timeIntervalSince1970)).jpg")
+    }
+
+    // MARK: - Dragging into Finder
+
+    /// Brings a file or folder to a fresh folder on this Mac, through the
+    /// transfer queue, and returns where it landed once it has. Finder copies
+    /// it from there; copies from drags over an hour old are cleared away.
+    func export(_ file: PhoneFile) async throws -> URL {
+        let dragged = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("com.khushi.Conduit/Dragged", isDirectory: true)
+        Self.clearOldDrags(in: dragged)
+        let folder = dragged.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        return try await withCheckedThrowingContinuation { continuation in
+            download([file], to: folder) { result in
+                switch result {
+                case .success(let url?): continuation.resume(returning: url)
+                case .success(nil): continuation.resume(throwing: ADBSync.Failure.unexpected("nothing arrived"))
+                case .failure(let error): continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func clearOldDrags(in folder: URL) {
+        let fileManager = FileManager.default
+        let cutoff = Date().addingTimeInterval(-3600)
+        let items = (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        for item in items {
+            let created = (try? item.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? .distantPast
+            if created < cutoff { try? fileManager.removeItem(at: item) }
         }
     }
 
@@ -191,7 +302,8 @@ final class PhoneFiles {
 
     // MARK: - Moving files
 
-    func download(_ files: [PhoneFile], to folder: URL, openWhenDone: Bool = false) {
+    func download(_ files: [PhoneFile], to folder: URL, openWhenDone: Bool = false,
+                  onFinish: ((Result<URL?, Error>) -> Void)? = nil) {
         // The folder may not exist yet — ~/S24U on first use.
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         for file in files {
@@ -217,6 +329,7 @@ final class PhoneFiles {
                 return destination
             }
             job.openWhenDone = openWhenDone
+            job.onFinish = onFinish
             queue.append(job)
         }
         startNext()
@@ -264,10 +377,6 @@ final class PhoneFiles {
         } else if running?.id == id {
             running?.cancel.cancel()
         }
-    }
-
-    func clearFinished() {
-        state.transfers.removeAll(where: \.isFinished)
     }
 
     // MARK: - Editing in place

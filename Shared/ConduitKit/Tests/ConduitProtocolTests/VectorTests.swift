@@ -175,6 +175,17 @@ struct BinaryMessageTests {
         #expect(InputEvent(frame: Frame(channel: .input, type: 0, payload: Data([0xff]))) == nil)
         #expect(InputEvent(frame: Frame(channel: .input, type: 1, payload: Data([9, 1]))) == nil)
         #expect(Vibration(frame: Frame(channel: .haptic, type: 0, payload: Data([0]))) == nil)
+        #expect(FileChunk(frame: Frame(channel: .file, type: 0, payload: Data(count: 11))) == nil)
+    }
+
+    @Test("file chunks match the vector bytes and carry offsets past 4 GiB")
+    func fileChunk() {
+        let chunk = FileChunk(transferID: 7, offset: 65_536, bytes: Data("hi".utf8))
+        #expect(chunk.frame.encoded() == Data(hex: "05000000000e0000000700000000000100006869"))
+        #expect(FileChunk(frame: chunk.frame) == chunk)
+
+        let far = FileChunk(transferID: .max, offset: 5 << 32 + 3, bytes: Data())
+        #expect(FileChunk(frame: far.frame) == far)
     }
 }
 

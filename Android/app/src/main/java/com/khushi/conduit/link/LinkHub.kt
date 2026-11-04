@@ -15,6 +15,9 @@ object LinkHub {
 
     data class PairingPrompt(val code: String, val macName: String)
 
+    /** Files on their way to the Mac: which one of how many, and how far along in all. */
+    data class Sending(val file: Int, val files: Int, val fraction: Float)
+
     sealed interface Status {
         data object Off : Status
         data object Looking : Status
@@ -35,6 +38,7 @@ object LinkHub {
         val hotspotRequestsReady: Boolean = false,
         /** Android is handing Conduit this phone's notifications. */
         val notificationsOn: Boolean = false,
+        val sending: Sending? = null,
     )
 
     private val mutable = MutableStateFlow(State())

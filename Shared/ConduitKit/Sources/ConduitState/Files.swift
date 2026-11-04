@@ -17,14 +17,25 @@ public nonisolated struct PhoneFile: Identifiable, Sendable, Hashable {
     public let isFolder: Bool
     public let size: UInt64
     public let modified: Date
+    /// When the photo or video was taken, or else when the file arrived on
+    /// the phone, from Android's media index. Nil for what it has not indexed.
+    public let created: Date?
+    /// Android keeps a thumbnail of it: a photo or a video.
+    public let hasThumbnail: Bool
 
-    public init(path: String, name: String, isFolder: Bool, size: UInt64, modified: Date) {
+    public init(path: String, name: String, isFolder: Bool, size: UInt64, modified: Date,
+                created: Date? = nil, hasThumbnail: Bool = false) {
         self.path = path
         self.name = name
         self.isFolder = isFolder
         self.size = size
         self.modified = modified
+        self.created = created
+        self.hasThumbnail = hasThumbnail
     }
+
+    /// When it was made, if Android knows; otherwise when it last changed.
+    public var createdOrModified: Date { created ?? modified }
 }
 
 /// A file — or a folder of them — on its way to this Mac or to the phone.
@@ -107,6 +118,8 @@ public final class FilesState {
     public package(set) var error: String?
     public package(set) var transfers: [FileTransfer] = []
     public package(set) var editing: [EditSession] = []
+    /// Thumbnails for the folder open now, as JPEG, by path.
+    public package(set) var thumbnails: [String: Data] = [:]
 
     package init() {}
 

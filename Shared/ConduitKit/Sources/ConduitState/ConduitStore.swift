@@ -94,6 +94,13 @@ public protocol ConduitCommands: AnyObject {
     func editPhoneFile(_ file: PhoneFile)
     /// Stop writing a file's saves back to the phone.
     func stopEditing(id: UUID)
+    /// Fetch a photo's or video's thumbnail, into FilesState.thumbnails.
+    func requestThumbnail(for file: PhoneFile)
+    /// The file scrolled out of sight: drop its thumbnail if not yet fetched.
+    func cancelThumbnail(for file: PhoneFile)
+    /// Bring a file or folder to this Mac for a drag into Finder, and say
+    /// where it landed.
+    func exportPhoneFile(_ file: PhoneFile) async throws -> URL
     func cancelTransfer(id: UUID)
     func clearFinishedTransfers()
 
