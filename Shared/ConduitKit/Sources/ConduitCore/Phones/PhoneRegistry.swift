@@ -103,7 +103,13 @@ enum PhoneRegistry {
                 isPreferred: id == preferredID,
                 companionApp: companionApps[id] ?? .unknown,
                 hotspotArmed: remembered?.hotspotPort != nil,
-                isOverHotspot: gateway.map { router in ready.contains { $0.device.serial.hasPrefix("\(router):") } } ?? false)
+                // Over the phone's hotspot: dialled at the gateway, or — with
+                // Wi-Fi sharing — at its Wi-Fi address while the gateway is
+                // the phone's own hotspot address.
+                isOverHotspot: gateway.map { router in
+                    ready.contains { $0.device.serial.hasPrefix("\(router):") }
+                        || (remembered?.wireless?.hotspotAddress == router && ready.contains { $0.transport == .wifi })
+                } ?? false)
         }
 
         for (id, remembered) in known where phones[id] == nil {

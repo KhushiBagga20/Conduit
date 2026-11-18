@@ -17,7 +17,7 @@ extension WifiReachability {
         case .connected: .connected
         case .trying, .debuggingOff, .waitingForApproval: .working
         case .unknown: .idle
-        case .notOnWiFi, .differentNetwork, .unreachable: .error
+        case .notOnWiFi, .differentNetwork, .unreachable, .keptApart: .error
         }
     }
 
@@ -31,6 +31,7 @@ extension WifiReachability {
         case .differentNetwork: "On different networks"
         case .trying: "Connecting over Wi-Fi…"
         case .unreachable: "Can't reach the phone"
+        case .keptApart: "This Wi-Fi keeps devices apart"
         }
     }
 
@@ -54,6 +55,8 @@ extension WifiReachability {
             nil
         case .unreachable:
             "They seem to share a network, but nothing gets through — offices, campuses and hotels often keep devices apart. Use the phone's hotspot, below."
+        case .keptApart:
+            "The phone and this Mac are both on it, but it won't let them reach each other — offices, campuses and hotels often do this, and no app can get past it. Use the phone's hotspot instead, below: with Wi-Fi sharing on, the phone stays on this Wi-Fi and passes its internet on to the Mac."
         }
     }
 }

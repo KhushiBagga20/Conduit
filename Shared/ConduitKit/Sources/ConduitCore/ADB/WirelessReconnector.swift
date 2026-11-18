@@ -27,9 +27,9 @@ final class WirelessReconnector {
     /// Wi-Fi transports currently attached for a phone, ready or not.
     var wifiTransports: (String) -> [ADBParsing.Device] = { _ in [] }
     var isMirroring: () -> Bool = { false }
-    /// Phones that armed adb's TCP mode, and the port each listens on, so
-    /// they can be reached over their own hotspot.
-    var hotspotTargets: () -> [String: UInt16] = { [:] }
+    /// Ports each phone may answer on over its own hotspot: adb's TCP port
+    /// when armed, and Wireless debugging's when the phone shares its Wi-Fi.
+    var hotspotTargets: () -> [String: [UInt16]] = { [:] }
     /// Where each known phone was last found on Wi-Fi — Wireless debugging's
     /// port, and adb's TCP port when armed — for networks where Bonjour
     /// finds nothing.
@@ -147,28 +147,45 @@ final class WirelessReconnector {
         }
 
         evaluateRemembered(now: now, skipping: advertised)
-        evaluateHotspot(now: now)
     }
 
     /// MEASURED: some networks carry no Bonjour between devices that can
-    /// still reach each other. A phone not advertising is tried where it was
-    /// last seen — and its identity checked, since an address can be reused.
+    /// still reach each other, and over a phone's hotspot there is none at
+    /// all — not even with Wi-Fi sharing keeping Wireless debugging on. A
+    /// phone not advertising is tried at the gateway, which is the phone
+    /// itself while this Mac is on its hotspot, and where it was last seen —
+    /// its identity checked each time, since anyone's router can answer and
+    /// an address can be reused.
     ///
-    /// Each address is tried in turn, with the phone's backoff between
+    /// One list per phone, tried in turn with the phone's backoff between
     /// attempts. MEASURED: alternating two addresses slipped past a backoff
     /// kept per address, and a phone on a network that keeps devices apart
-    /// was tried every five seconds. A network change starts over at once.
+    /// was tried every five seconds; and two lists each taking their turn
+    /// let a failing remembered address starve the gateway. A network change
+    /// starts over at once.
     private func evaluateRemembered(now: Date, skipping advertised: Set<String>) {
-        let byPhone = Dictionary(grouping: rememberedTargets(), by: \.phoneID)
+        var byPhone = Dictionary(grouping: rememberedTargets(), by: \.phoneID).mapValues { $0.map(\.target) }
+        if let gateway = HotspotLink.currentGateway() {
+            for (phoneID, ports) in hotspotTargets() {
+                byPhone[phoneID, default: []].insert(contentsOf: ports.map { "\(gateway):\($0)" }, at: 0)
+            }
+        }
         for (phoneID, entries) in byPhone where !advertised.contains(phoneID) && isKnownPhone(phoneID) {
+            var targets: [String] = []
+            for target in entries where !targets.contains(target) { targets.append(target) }
             let transports = wifiTransports(phoneID)
-            guard !transports.contains(where: \.isReady), !inFlight.contains(phoneID),
+            guard !targets.isEmpty, !transports.contains(where: \.isReady), !inFlight.contains(phoneID),
                   (nextAttempt[phoneID] ?? .distantPast) <= now
             else { continue }
-            let targets = entries.map(\.target)
-            let target = targets.first { $0 != failedTarget[phoneID] } ?? targets[0]
-            connect(phoneID: phoneID, target: target, stale: transports.map(\.serial), verifyIdentity: true)
+            connect(phoneID: phoneID, target: Self.next(after: failedTarget[phoneID], in: targets),
+                    stale: transports.map(\.serial), verifyIdentity: true)
         }
+    }
+
+    /// The target after the one that failed last, round the list.
+    nonisolated static func next(after failed: String?, in targets: [String]) -> String {
+        guard let failed, let index = targets.firstIndex(of: failed) else { return targets[0] }
+        return targets[(index + 1) % targets.count]
     }
 
     /// This Mac joined another network: what failed before may work now.
@@ -179,25 +196,6 @@ final class WirelessReconnector {
         evaluate()
     }
 
-    /// Over a hotspot there is no advert to find: Android turns Wireless
-    /// debugging off with Wi-Fi, and the phone is the network. Knock on the
-    /// gateway, which is the phone itself.
-    private func evaluateHotspot(now: Date) {
-        let armed = hotspotTargets()
-        guard !armed.isEmpty, let gateway = HotspotLink.currentGateway() else { return }
-
-        for (phoneID, port) in armed where isKnownPhone(phoneID) {
-            let transports = wifiTransports(phoneID)
-            guard !transports.contains(where: \.isReady), !inFlight.contains(phoneID) else { continue }
-
-            let target = "\(gateway):\(port)"
-            let retryingSameAddress = failedTarget[phoneID] == target
-            guard !retryingSameAddress || (nextAttempt[phoneID] ?? .distantPast) <= now else { continue }
-
-            connect(phoneID: phoneID, target: target, stale: transports.map(\.serial), verifyIdentity: true)
-        }
-    }
-
     private func connect(phoneID: String, target: String, stale: [String],
                          verifyIdentity: Bool = false, refresh: (() -> Void)? = nil) {
         inFlight.insert(phoneID)
@@ -206,6 +204,11 @@ final class WirelessReconnector {
 
         Task {
             var output = await Task.detached { () -> ADB.Output in
+                // A guessed address is knocked on first: an unreachable one
+                // fails in two seconds rather than adb's twelve.
+                if verifyIdentity, !Self.canReach(target) {
+                    return ADB.Output(status: 1, stdout: "", stderr: "\(target) didn't answer", data: Data())
+                }
                 // A transport stuck offline shadows a fresh connection.
                 for serial in stale { adb.disconnect(serial) }
                 return adb.run(["connect", target], timeout: 12)

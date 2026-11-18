@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppModel.shared.engine.start()
         AppModel.shared.watchRinging()
         AppModel.shared.watchNotifications()
+        AppModel.shared.watchAlerts()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

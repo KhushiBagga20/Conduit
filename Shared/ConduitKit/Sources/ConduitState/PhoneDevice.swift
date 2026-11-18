@@ -53,12 +53,24 @@ public nonisolated struct WirelessInfo: Sendable, Equatable, Codable {
     /// restarts, so it is a first guess, not a promise.
     public var port: UInt16?
     public var checked: Date
+    /// Whether this Mac could open that port while the phone was plugged in
+    /// and on the same network. False means the network keeps them apart.
+    public var reachable: Bool?
+    /// The phone's hotspot passes its Wi-Fi on, and it stays on that Wi-Fi
+    /// with Wireless debugging still listening. Nil where unknown.
+    public var wifiSharing: Bool?
+    /// The phone's address on its own hotspot, last time it was on.
+    public var hotspotAddress: String?
 
-    public init(debuggingOn: Bool, address: String?, port: UInt16?, checked: Date) {
+    public init(debuggingOn: Bool, address: String?, port: UInt16?, checked: Date, reachable: Bool? = nil,
+                wifiSharing: Bool? = nil, hotspotAddress: String? = nil) {
         self.debuggingOn = debuggingOn
         self.address = address
         self.port = port
         self.checked = checked
+        self.reachable = reachable
+        self.wifiSharing = wifiSharing
+        self.hotspotAddress = hotspotAddress
     }
 }
 
@@ -80,6 +92,9 @@ public nonisolated enum WifiReachability: Sendable, Equatable {
     /// On the same network, but nothing gets through — usually a network
     /// that keeps its devices from reaching each other.
     case unreachable
+    /// Measured while plugged in: on the same network, and this Mac could
+    /// not reach the phone's open port. The network keeps its devices apart.
+    case keptApart
 }
 
 /// Conduit for Android on this phone, as seen over adb.
@@ -111,6 +126,9 @@ public nonisolated struct PhoneDevice: Identifiable, Sendable, Equatable {
     public var hotspotArmed: Bool
     /// This Mac is on the phone's hotspot and connected through it.
     public var isOverHotspot: Bool
+    /// The phone's hotspot passes its Wi-Fi on, so the phone stays on that
+    /// Wi-Fi — and reachable — while the Mac uses its hotspot.
+    public var sharesWiFi: Bool = false
     /// Whether it works without the cable, and why not.
     public var wifi: WifiReachability = .unknown
 

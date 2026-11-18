@@ -52,6 +52,8 @@ public protocol ConduitCommands: AnyObject {
     /// debugging cannot go, and stop again.
     func prepareHotspotConnection(phoneID: String)
     func stopHotspotConnection(phoneID: String)
+    /// Put the phone's hotspot switch on its screen, over adb or Bluetooth.
+    func openPhoneHotspotSettings(phoneID: String)
 
     /// Ask linked phones over Bluetooth to turn their hotspot on.
     func requestPhoneHotspot()
@@ -198,6 +200,9 @@ public final class ConduitStore {
     public let clipboard = ClipboardState()
     public let files = FilesState()
     public package(set) var activity: [ActivityEvent] = []
+    /// The latest thing Conduit itself needs to tell the person straight
+    /// away, as a notification on this Mac. Each new one replaces the last.
+    public package(set) var alert: ConduitAlert?
     /// What is showing on the linked phone, newest first. In memory only:
     /// Conduit never writes a notification down.
     public package(set) var notifications: [PhoneNotification] = []

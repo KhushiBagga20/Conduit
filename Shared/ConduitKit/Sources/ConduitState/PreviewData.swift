@@ -25,6 +25,8 @@ extension ConduitStore {
         case empty
         /// Connected, with mirroring waiting for the phone to come back.
         case waitingForPhone
+        /// Plugged in, on a Wi-Fi that keeps the phone and Mac apart.
+        case keptApart
     }
 
     public static func preview(_ scenario: PreviewScenario = .connected) -> ConduitStore {
@@ -50,6 +52,15 @@ extension ConduitStore {
                 ActivityEvent(kind: .phoneConnected, title: "Galaxy S24 Ultra connected", detail: "Over USB",
                               date: Date().addingTimeInterval(-320)),
             ]
+        case .keptApart:
+            var phone = PhoneDevice(id: "PREVIEW-S24", name: "Galaxy S24 Ultra", model: "SM-S928B", manufacturer: "samsung",
+                                    osVersion: osVersion, connection: .connected(.usb), transports: [.usb],
+                                    features: previewFeatures(connected: true), lastSeen: Date(), isPreferred: true,
+                                    companionApp: .installed(canManageSettings: false))
+            phone.wifi = .keptApart
+            phone.sharesWiFi = true
+            store.phones = [phone]
+            store.activePhoneID = "PREVIEW-S24"
         case .disconnected:
             store.phones = [
                 PhoneDevice(id: "PREVIEW-S24", name: "Galaxy S24 Ultra", model: "SM-S928B", manufacturer: "samsung",

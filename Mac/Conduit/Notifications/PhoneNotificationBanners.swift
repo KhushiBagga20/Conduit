@@ -3,12 +3,14 @@
 //  Conduit
 //
 //  Shows the phone's notifications as this Mac's own, which is the whole
-//  point of the feature: nobody watches a list in a window.
+//  point of the feature: nobody watches a list in a window. Conduit's own
+//  alerts — this Mac leaving the phone's hotspot — go out the same way.
 //
 //  macOS asks for permission the first time one is posted, not at launch —
 //  a prompt before anything has happened is a prompt with no context.
 //
 
+import AppKit
 import ConduitProtocol
 import ConduitState
 import UserNotifications
@@ -17,6 +19,7 @@ import UserNotifications
 final class PhoneNotificationBanners: NSObject {
 
     private static let category = "phone-notification"
+    private static let alertCategory = "conduit-alert"
     private static let dismissAction = "dismiss"
     private static let openAction = "open"
 
@@ -73,6 +76,22 @@ final class PhoneNotificationBanners: NSObject {
         }
     }
 
+    /// One of Conduit's own: this Mac left the phone's hotspot, say. It
+    /// replaces the last of its kind rather than piling up.
+    func post(_ alert: ConduitAlert) {
+        Task { @MainActor in
+            guard await allowedToShow() else { return }
+            let content = UNMutableNotificationContent()
+            content.title = alert.title
+            content.body = alert.body
+            content.categoryIdentifier = Self.alertCategory
+            content.userInfo = ["action": alert.action == .openWiFiSettings ? "wifi" : ""]
+            content.sound = .default
+            try? await UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: Self.alertCategory, content: content, trigger: nil))
+        }
+    }
+
     private func post(_ notification: PhoneNotification) {
         let content = UNMutableNotificationContent()
         let title = notification.title.flatMap { $0.isEmpty ? nil : $0 }
@@ -104,7 +123,15 @@ extension PhoneNotificationBanners: UNUserNotificationCenterDelegate {
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             didReceive response: UNNotificationResponse) async {
-        let key = response.notification.request.content.userInfo["key"] as? String
+        let content = response.notification.request.content
+        if content.categoryIdentifier == Self.alertCategory {
+            if content.userInfo["action"] as? String == "wifi",
+               let url = URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension") {
+                await MainActor.run { _ = NSWorkspace.shared.open(url) }
+            }
+            return
+        }
+        let key = content.userInfo["key"] as? String
         await MainActor.run {
             guard let key else { return }
             switch response.actionIdentifier {

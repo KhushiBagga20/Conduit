@@ -67,6 +67,12 @@ enum SnapshotRenderer {
         }
         defaults.set(savedView, forKey: "files.view")
 
+        let devices = WorkspaceRouter()
+        devices.section = .devices
+        render(WorkspaceView().environment(ConduitStore.preview(.keptApart)).environment(devices),
+               size: CGSize(width: 1000, height: 760), appearance: .darkAqua, titled: true,
+               to: directory.appendingPathComponent("workspace-devices-kept-apart-dark.png"))
+
         render(PhoneWindowView().environment(ConduitStore.preview(.waitingForPhone)),
                size: CGSize(width: 400, height: 820), appearance: .darkAqua, titled: true,
                to: directory.appendingPathComponent("phone-window-waiting.png"))

@@ -129,7 +129,9 @@ struct DevicesPage: View {
             LabeledContent {
                 if phone.hotspotArmed {
                     Button("Turn Off") { store.commands?.stopHotspotConnection(phoneID: phone.id) }
-                } else {
+                } else if !phone.sharesWiFi {
+                    // With Wi-Fi sharing, Wireless debugging already answers
+                    // on the hotspot; adb's own port would only add exposure.
                     Button("Get Ready") { store.commands?.prepareHotspotConnection(phoneID: phone.id) }
                         .disabled(!phone.connection.isConnected)
                 }
@@ -147,15 +149,34 @@ struct DevicesPage: View {
         } header: {
             Text("Anywhere")
         } footer: {
-            Label("Android turns Wireless debugging off whenever Wi-Fi is off, so a hotspot needs adb's own port instead. While this is on, the phone accepts adb connections on port \(String(HotspotAccess.port)) over every network it joins, until you turn it off or restart the phone. A computer it has never allowed still has to be allowed on the phone.",
+            Label("With Wi-Fi sharing on, the phone stays on its Wi-Fi while sharing it, and Conduit reaches it through the hotspot as it is. Without it, Android turns Wireless debugging off with Wi-Fi, so Get Ready opens adb's own port instead: while it is on, the phone accepts adb connections on port \(String(HotspotAccess.port)) over every network it joins, until you turn it off or restart the phone. A computer it has never allowed still has to be allowed on the phone.",
                   systemImage: "exclamationmark.shield")
         }
     }
 
     private func hotspotStatus(_ phone: PhoneDevice) -> String {
         if phone.isOverHotspot { return "Connected through the phone's hotspot" }
+        if phone.sharesWiFi { return "Ready — Wi-Fi sharing keeps Wireless debugging on, so nothing needs opening" }
         if phone.hotspotArmed { return "Ready — the phone is listening on port \(String(HotspotAccess.port))" }
         return "Off. Wireless debugging needs a Wi-Fi network both devices are on."
+    }
+
+    /// On a Wi-Fi that keeps devices apart, the phone's hotspot is the way
+    /// round it.
+    private func needsHotspot(_ phone: PhoneDevice) -> Bool {
+        guard !phone.isOverHotspot else { return false }
+        switch phone.wifi {
+        case .keptApart, .unreachable: return true
+        default: return false
+        }
+    }
+
+    private func hotspotSteps(_ phone: PhoneDevice) -> String {
+        let steps = "Turn Mobile Hotspot on — this button puts the switch on the phone's screen — then join this Mac to it from the Wi-Fi menu. Conduit connects by itself."
+        if phone.sharesWiFi {
+            return steps + " Wi-Fi sharing is on, so the phone stays on this Wi-Fi and the Mac keeps using its internet, not mobile data."
+        }
+        return steps + " If the phone can share its Wi-Fi through the hotspot (Samsung calls it Wi-Fi sharing), turn that on: the Mac keeps this Wi-Fi's internet and nothing else is needed. Otherwise choose Get Ready, below, while the phone is plugged in."
     }
 
     @ViewBuilder
@@ -216,6 +237,14 @@ struct DevicesPage: View {
                 Text("Without the cable")
                 if let detail = phone.wifi.detail(keepsConnected: store.preferences.autoConnectWireless) {
                     Text(detail)
+                }
+            }
+            if needsHotspot(phone) {
+                LabeledContent {
+                    Button("Open Hotspot Settings") { store.commands?.openPhoneHotspotSettings(phoneID: phone.id) }
+                } label: {
+                    Text("Use the phone's hotspot")
+                    Text(hotspotSteps(phone))
                 }
             }
             LabeledContent("Model", value: phone.modelText)

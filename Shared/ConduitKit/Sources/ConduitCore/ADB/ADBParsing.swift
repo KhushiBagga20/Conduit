@@ -235,6 +235,12 @@ nonisolated enum ADBParsing {
         let port: UInt16?
         /// The phone's address on the Wi-Fi network it has joined.
         let wifiAddress: String?
+        /// Samsung's Wi-Fi sharing: the hotspot passes the phone's Wi-Fi on
+        /// rather than mobile data, and the phone stays on that Wi-Fi. Nil
+        /// where the phone has no such setting.
+        var wifiSharing: Bool? = nil
+        /// The phone's own address on its hotspot, while the hotspot is on.
+        var hotspotAddress: String? = nil
     }
 
     /// One shell command: Wireless debugging's switch, its port, every IPv4
@@ -245,40 +251,67 @@ nonisolated enum ADBParsing {
     /// user (uid 2000), so its listening sockets give the port instead.
     static let wirelessProbeCommand =
         "echo \"wd=$(settings get global adb_wifi_enabled)\"; echo \"port=$(getprop service.adb.tls.port)\"; "
+        + "echo \"share=$(settings get secure wifi_ap_wifi_sharing)\"; "
         + "ip -4 -o addr show 2>/dev/null; "
         + "cat /proc/net/tcp6 /proc/net/tcp 2>/dev/null | awk '$4==\"0A\" && $8==\"2000\" {print \"listen=\" $2}'"
 
-    static func wirelessProbe(_ output: String) -> WirelessProbe {
+    /// `excluding` names ports adbd listens on for Conduit's own sake — the
+    /// `adb reverse` that carries Conduit Link. MEASURED on a Galaxy S24
+    /// Ultra: that listener is open on every interface, like Wireless
+    /// debugging's, so only its number tells them apart.
+    static func wirelessProbe(_ output: String, excluding: Set<UInt16> = []) -> WirelessProbe {
         var debuggingOn = false
         var port: UInt16?
         var listening: UInt16?
         var address: String?
+        var sharing: Bool?
+        var hotspot: String?
         for raw in output.split(separator: "\n") {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("wd=") {
                 debuggingOn = line.dropFirst(3) == "1"
+            } else if line.hasPrefix("share=") {
+                sharing = ["1": true, "0": false][String(line.dropFirst(6))]
             } else if line.hasPrefix("port=") {
                 port = UInt16(line.dropFirst(5)).flatMap { $0 > 0 ? $0 : nil }
             } else if line.hasPrefix("listen="), listening == nil,
-                      let hex = line.split(separator: ":").last, let found = UInt16(hex, radix: 16),
-                      found != HotspotAccess.port {
-                // adb's own TCP port, when armed, is not Wireless debugging's.
+                      case let parts = line.dropFirst(7).split(separator: ":"), parts.count == 2,
+                      parts[0].allSatisfy({ $0 == "0" }),
+                      let found = UInt16(parts[1], radix: 16), found != HotspotAccess.port, !excluding.contains(found) {
+                // Only a socket open to every interface, and not one Conduit
+                // asked for. MEASURED: taking the port of the `adb reverse`
+                // that carries Conduit Link as Wireless debugging's left
+                // every later reconnect knocking on the wrong door. adb's own
+                // TCP port, when armed, is not it either.
                 listening = found
             } else if address == nil, let found = wifiAddress(inIPLine: line) {
                 address = found
+            } else if hotspot == nil, let found = hotspotAddress(inIPLine: line) {
+                hotspot = found
             }
         }
-        return WirelessProbe(debuggingOn: debuggingOn, port: port ?? (debuggingOn ? listening : nil), wifiAddress: address)
+        return WirelessProbe(debuggingOn: debuggingOn, port: port ?? (debuggingOn ? listening : nil), wifiAddress: address,
+                             wifiSharing: sharing, hotspotAddress: hotspot)
     }
 
     /// `30: wlan0    inet 192.168.31.5/24 brd …` gives 192.168.31.5. Only the
     /// Wi-Fi client interfaces count — wlan0, wlan1 — not the hotspot's own
     /// (swlan0, ap0) or mobile data (rmnet).
     static func wifiAddress(inIPLine line: String) -> String? {
+        address(inIPLine: line, interfaces: ["wlan"])
+    }
+
+    /// The same for the phone's hotspot: Samsung's swlan0, or AOSP's ap0.
+    static func hotspotAddress(inIPLine line: String) -> String? {
+        address(inIPLine: line, interfaces: ["swlan", "ap"])
+    }
+
+    private static func address(inIPLine line: String, interfaces: [String]) -> String? {
         let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
         guard fields.count >= 4, fields[2] == "inet" else { return nil }
         let interface = fields[1]
-        guard interface.hasPrefix("wlan"), interface.dropFirst(4).allSatisfy(\.isNumber) else { return nil }
+        guard let prefix = interfaces.first(where: interface.hasPrefix),
+              interface.dropFirst(prefix.count).allSatisfy(\.isNumber) else { return nil }
         let address = String(fields[3].prefix { $0 != "/" })
         let octets = address.split(separator: ".")
         guard octets.count == 4, octets.allSatisfy({ UInt8($0) != nil }) else { return nil }

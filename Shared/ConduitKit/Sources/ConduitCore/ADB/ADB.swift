@@ -173,10 +173,21 @@ nonisolated struct ADB: Sendable {
     }
 
     /// Wireless debugging's state and where the phone is on Wi-Fi.
-    func wirelessProbe(serial: String) -> ADBParsing.WirelessProbe? {
+    func wirelessProbe(serial: String, excluding: Set<UInt16> = []) -> ADBParsing.WirelessProbe? {
         let output = run(["-s", serial, "shell", ADBParsing.wirelessProbeCommand], timeout: 8)
         guard output.ok else { return nil }
-        return ADBParsing.wirelessProbe(output.stdout)
+        return ADBParsing.wirelessProbe(output.stdout, excluding: excluding)
+    }
+
+    /// Opens the phone's hotspot switch on its screen: Samsung's own Mobile
+    /// Hotspot page where there is one, else Android's tethering page.
+    /// Android lets no one but the person turn a hotspot on.
+    func openHotspotSettings(serial: String) -> Bool {
+        let samsung = "com.samsung.settings.WIFI_AP_SETTINGS"
+        let command = "if cmd package query-activities -a \(samsung) | grep -q packageName; "
+            + "then am start -a \(samsung); else am start -a android.settings.TETHER_SETTINGS; fi"
+        let output = run(["-s", serial, "shell", command], timeout: 8)
+        return output.ok && !output.combined.contains("Error")
     }
 
     /// Turns Wireless debugging on. The first time on a network, the phone

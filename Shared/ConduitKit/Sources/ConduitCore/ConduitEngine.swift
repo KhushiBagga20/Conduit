@@ -57,6 +57,8 @@ public final class ConduitEngine: ConduitCommands {
     /// Counts link sends, so an old outcome is not cleared by a newer one.
     private var linkSendGeneration = 0
     private let ringer = MacRinger()
+    /// Phones this Mac reached through their own hotspot at the last look.
+    private var overHotspot: Set<String> = []
     private let trackpad = TrackpadInput()
     /// Files the phone sends over the Link; when this Mac gives up on one,
     /// the phone is told to stop sending it.
@@ -178,7 +180,22 @@ public final class ConduitEngine: ConduitCommands {
         }
         reconnector.isMirroring = { [weak self] in self?.store.mirroring.status.isActive ?? false }
         reconnector.hotspotTargets = { [weak self] in
-            self?.known.compactMapValues(\.hotspotPort) ?? [:]
+            guard let self else { return [:] }
+            let mac = LinkAddresses.ipv4()
+            return known.compactMapValues { phone -> [UInt16]? in
+                var ports = phone.hotspotPort.map { [$0] } ?? []
+                // MEASURED on a Galaxy S24 Ultra with Wi-Fi sharing on: the
+                // phone stays on its Wi-Fi while sharing it, Wireless
+                // debugging keeps its port, and it answers on the hotspot
+                // too — so nothing needs arming. Only worth a knock while this
+                // Mac is somewhere other than the phone's own Wi-Fi.
+                if let wireless = phone.wireless, wireless.debuggingOn, let port = wireless.port,
+                   let address = wireless.address,
+                   !mac.contains(where: { ADBParsing.probablySameNetwork($0, address) }) {
+                    ports.append(port)
+                }
+                return ports.isEmpty ? nil : ports
+            }
         }
         reconnector.rememberedTargets = { [weak self] in
             guard let self else { return [] }
@@ -370,6 +387,25 @@ public final class ConduitEngine: ConduitCommands {
             publishPhones()
             store.record(ActivityEvent(kind: .phoneConnected, title: "Ready for this phone's hotspot",
                                        detail: "Turn the phone's hotspot on and join this Mac to it."))
+        }
+    }
+
+    /// Put the phone's hotspot switch on its screen — over adb when it is
+    /// connected, else by asking over Bluetooth, which shows a notification
+    /// that opens it. Android lets only the person turn a hotspot on.
+    public func openPhoneHotspotSettings(phoneID: String) {
+        guard let adb, let serial = PhoneRegistry.targets(for: phoneID, attached: Array(attached.values)).first?.serial
+        else {
+            requestPhoneHotspot()
+            return
+        }
+        Task {
+            let opened = await Task.detached { adb.openHotspotSettings(serial: serial) }.value
+            store.record(opened
+                ? ActivityEvent(kind: .reconnecting, title: "Opened the phone's hotspot settings",
+                                detail: "Turn Mobile Hotspot on there, then join this Mac to it from the Wi-Fi menu.")
+                : ActivityEvent(kind: .error, title: "Couldn't open the phone's hotspot settings",
+                                detail: "Turn the hotspot on from the phone's quick settings instead."))
         }
     }
 
@@ -1140,13 +1176,39 @@ public final class ConduitEngine: ConduitCommands {
         guard let adb, !wirelessChecks.contains(phoneID) else { return }
         wirelessChecks.insert(phoneID)
         Task {
-            let probe = await Task.detached { adb.wirelessProbe(serial: serial) }.value
+            let ownPorts: Set<UInt16> = [store.link.port ?? LinkServer.preferredPort]
+            let probe = await Task.detached { adb.wirelessProbe(serial: serial, excluding: ownPorts) }.value
+            guard let probe, known[phoneID] != nil else {
+                wirelessChecks.remove(phoneID)
+                return
+            }
+            // While the cable is in, the phone says where it listens, so
+            // whether this Mac can get there is a fact, not a guess. MEASURED
+            // on a campus network: both on the same subnet, each reaching the
+            // router, neither reaching the other — "No route to host".
+            var reachable: Bool?
+            if let address = probe.wifiAddress, let port = probe.port,
+               LinkAddresses.ipv4().contains(where: { ADBParsing.probablySameNetwork($0, address) }) {
+                reachable = await Task.detached { WirelessReconnector.canReach("\(address):\(port)") }.value
+            }
             wirelessChecks.remove(phoneID)
-            guard let probe, known[phoneID] != nil else { return }
+            let previous = known[phoneID]?.wireless
+            let wasKeptApart = previous?.reachable == false && previous?.address == probe.wifiAddress
+            // Checked from somewhere else — the phone's hotspot — says
+            // nothing about its Wi-Fi: keep what was measured there.
+            if reachable == nil, previous?.address == probe.wifiAddress { reachable = previous?.reachable }
             known[phoneID]?.wireless = WirelessInfo(debuggingOn: probe.debuggingOn, address: probe.wifiAddress,
-                                                    port: probe.port, checked: Date())
+                                                    port: probe.port, checked: Date(), reachable: reachable,
+                                                    wifiSharing: probe.wifiSharing,
+                                                    hotspotAddress: probe.hotspotAddress
+                                                        ?? known[phoneID]?.wireless?.hotspotAddress)
             saveKnownPhones()
             publishPhones()
+            if reachable == false, !wasKeptApart {
+                CoreLog.engine.notice("the phone's Wi-Fi keeps it and this Mac apart")
+                store.record(ActivityEvent(kind: .error, title: "This Wi-Fi keeps the phone and Mac apart",
+                                           detail: "Both are on it, but it doesn't let them reach each other. Use the phone's hotspot — see Devices."))
+            }
 
             // MEASURED on a Galaxy S24 Ultra: the switch can read on while
             // nothing listens — Android waits for the Wi-Fi network to be
@@ -1208,7 +1270,36 @@ public final class ConduitEngine: ConduitCommands {
         if let first = mac.first, !mac.contains(where: { ADBParsing.probablySameNetwork($0, address) }) {
             return .differentNetwork(phone: address, mac: first)
         }
+        if wireless.reachable == false { return .keptApart }
         return reconnector?.hasFailed(phone.id) == true ? .unreachable : .trying
+    }
+
+    /// MEASURED: this Mac's Wi-Fi chip reset itself, macOS rejoined the
+    /// campus Wi-Fi rather than the phone's hotspot, and nothing said so —
+    /// mirroring was lost the moment the cable came out, twenty minutes
+    /// later. When a phone reached through its hotspot is not back over
+    /// Wi-Fi a few seconds after, say so once, as a notification.
+    private func noticeLeavingHotspot() {
+        let now = Set(store.phones.filter(\.isOverHotspot).map(\.id))
+        let left = overHotspot.subtracting(now)
+        overHotspot = now
+        for phoneID in left {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                guard let self, let phone = store.phones.first(where: { $0.id == phoneID }),
+                      !phone.isOverHotspot, !phone.transports.contains(.wifi), !overHotspot.contains(phoneID)
+                else { return }
+                let alert = HotspotLink.currentGateway() == nil
+                    ? ConduitAlert(title: "\(phone.name)'s hotspot is gone",
+                                   body: "It may have turned itself off. Turn it on again on the phone and join this Mac to it to keep using the phone without the cable.",
+                                   action: .openWiFiSettings)
+                    : ConduitAlert(title: "Your Mac left \(phone.name)'s hotspot",
+                                   body: "macOS joined another Wi-Fi, where Conduit can't reach the phone. Join the phone's hotspot again from the Wi-Fi menu to keep using it without the cable.",
+                                   action: .openWiFiSettings)
+                CoreLog.engine.notice("this Mac left the phone's hotspot")
+                store.alert = alert
+                store.record(ActivityEvent(kind: .error, title: alert.title, detail: alert.body))
+            }
+        }
     }
 
     private func saveKnownPhones() {
@@ -1231,8 +1322,10 @@ public final class ConduitEngine: ConduitCommands {
             .map { phone in
                 var phone = phone
                 phone.wifi = wifiReachability(for: phone)
+                phone.sharesWiFi = known[phone.id]?.wireless?.wifiSharing == true
                 return phone
             }
+        noticeLeavingHotspot()
 
         // Keep the user's choice while it exists; otherwise prefer the
         // preferred phone, then any connected phone, then anything known.
@@ -1320,6 +1413,8 @@ public final class ConduitEngine: ConduitCommands {
         recordConnectionChanges(from: before, to: store.phones)
         announcePendingConnections()
         mirroring?.phonesChanged()
+        // Learn where the phone is now — its hotspot address among it.
+        checkWireless(phoneID: phoneID, serial: serial)
     }
 
     // MARK: - Files

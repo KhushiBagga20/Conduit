@@ -43,6 +43,19 @@ final class AppModel {
         }
     }
 
+    /// Post Conduit's own alerts — such as this Mac leaving the phone's
+    /// hotspot — as notifications on this Mac.
+    func watchAlerts() {
+        withObservationTracking { [self] in
+            _ = store.alert
+        } onChange: { [self] in
+            Task { @MainActor in
+                if let alert = store.alert { banners.post(alert) }
+                watchAlerts()
+            }
+        }
+    }
+
     /// Put the ringing window on screen whenever a phone goes looking for
     /// this Mac, and take it away when the ringing stops. The window belongs
     /// to no scene: it has to appear over other apps, on any Space, whether

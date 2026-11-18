@@ -80,6 +80,30 @@ These shape the product and are shown in the UI rather than hidden.
   Devices → Without the cable; the phone's hotspot works instead, and
   Conduit reconnects over it by itself (checked on a Galaxy S24 Ultra: back
   eight seconds after launch, no cable, files moved byte for byte).
+- **A Wi-Fi that keeps devices apart cannot carry Wireless debugging at
+  all.** MEASURED on a campus network: the
+  phone and the Mac each reach the router, and neither reaches the other —
+  "No route to host" both ways, no Bonjour. While the phone is plugged in,
+  Conduit now tests this itself and says "This Wi-Fi keeps devices apart"
+  instead of guessing, with a button that puts the phone's hotspot switch on
+  its screen. With Samsung's Wi-Fi sharing on, the phone stays on that Wi-Fi
+  while sharing it: the Mac keeps its internet through the phone (no mobile
+  data), Wireless debugging keeps its port, and Conduit connects through the
+  hotspot's gateway by itself — measured: 0.3 s to reconnect, 6.3 MB/s, files
+  byte for byte; mirroring checked by hand with the cable out. No Bonjour
+  reaches the hotspot, so Conduit knocks on the gateway and on where the phone
+  was last seen, in turn, checking who answers. One thing it cannot hold:
+  MEASURED, when the Mac's Wi-Fi chip reset itself (macOS logged a firmware
+  trap), macOS rejoined the campus Wi-Fi rather than the hotspot; rejoining
+  the hotspot brought mirroring back by itself within four seconds. Conduit
+  now says so with a notification on the Mac when it leaves the phone's
+  hotspot and the phone is not back within ten seconds (built; not yet seen
+  firing, since the Mac had to leave the hotspot for real).
+- **The phone's Wireless debugging port was misread for a while.** The `adb
+  reverse` that carries Conduit Link has adbd listen on a second port, open
+  on every interface; Conduit took it for Wireless debugging's, and every
+  reconnect from a remembered address knocked on the wrong door. It now
+  leaves out the ports Conduit itself asked for.
 - **Some networks let the Mac reach the phone but not the other way** —
   one subnet behind another, as on the test desk (the Mac on 192.168.1.x,
   the phone on 192.168.31.x). Conduit Link is dialled by the phone, so it

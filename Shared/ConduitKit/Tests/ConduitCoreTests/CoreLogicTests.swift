@@ -327,7 +327,8 @@ struct WirelessProbeTests {
         30: wlan0    inet 192.168.31.5/24 brd 192.168.31.255 scope global wlan0\\       valid_lft forever preferred_lft forever
         """
         #expect(ADBParsing.wirelessProbe(output) ==
-                ADBParsing.WirelessProbe(debuggingOn: true, port: 37451, wifiAddress: "192.168.31.5"))
+                ADBParsing.WirelessProbe(debuggingOn: true, port: 37451, wifiAddress: "192.168.31.5",
+                                         hotspotAddress: "10.129.224.104"))
     }
 
     @Test("Android 16 leaves the port property empty; adbd's listening socket gives it")
@@ -343,6 +344,40 @@ struct WirelessProbeTests {
                 ADBParsing.WirelessProbe(debuggingOn: true, port: 46425, wifiAddress: "10.0.88.40"))
         // Switched off: a listener is not Wireless debugging's.
         #expect(ADBParsing.wirelessProbe("wd=0\nport=\nlisten=00000000000000000000000000000000:B559").port == nil)
+    }
+
+    @Test("adb reverse's listener on the phone's loopback is not Wireless debugging's")
+    func reverseListenerIgnored() {
+        let output = """
+        wd=1
+        port=
+        44: wlan0    inet 10.0.88.40/22 brd 10.0.91.255 scope global dynamic wlan0
+        listen=0100007F:B918
+        listen=00000000000000000000000001000000:B918
+        listen=00000000000000000000000000000000:B559
+        """
+        #expect(ADBParsing.wirelessProbe(output).port == 46425)
+    }
+
+    @Test("with the hotspot on and Wi-Fi sharing, the phone stays on Wi-Fi and says where its hotspot is")
+    func hotspotWithWiFiSharing() {
+        // As a Galaxy S24 Ultra on a campus Wi-Fi reads, hotspot on (addresses made up):
+        // adb reverse's listener is open on every interface, and listed first.
+        let output = """
+        wd=1
+        port=
+        share=1
+        44: wlan0    inet 10.0.88.77/22 brd 10.0.91.255 scope global dynamic wlan0
+        52: swlan0    inet 10.120.40.1/24 brd 10.120.40.255 scope global swlan0
+        listen=00000000000000000000000000000000:B918
+        listen=00000000000000000000000000000000:9053
+        """
+        let probe = ADBParsing.wirelessProbe(output, excluding: [47384])
+        #expect(probe == ADBParsing.WirelessProbe(debuggingOn: true, port: 36947, wifiAddress: "10.0.88.77",
+                                                  wifiSharing: true, hotspotAddress: "10.120.40.1"))
+        // A phone without the setting answers "null".
+        #expect(ADBParsing.wirelessProbe("wd=1\nshare=null").wifiSharing == nil)
+        #expect(ADBParsing.wirelessProbe("wd=1\nshare=0").wifiSharing == false)
     }
 
     @Test("off, and not on Wi-Fi")
@@ -363,6 +398,17 @@ struct WirelessProbeTests {
 
 @Suite("Reaching a phone directly")
 struct ReachabilityTests {
+
+    @Test("guessed addresses are tried in turn, the gateway first, so none starves another")
+    func rotation() {
+        let targets = ["10.120.40.1:36947", "10.0.88.77:36947", "10.0.88.77:5555"]
+        #expect(WirelessReconnector.next(after: nil, in: targets) == targets[0])
+        #expect(WirelessReconnector.next(after: targets[0], in: targets) == targets[1])
+        #expect(WirelessReconnector.next(after: targets[1], in: targets) == targets[2])
+        #expect(WirelessReconnector.next(after: targets[2], in: targets) == targets[0])
+        // A failure somewhere no longer listed starts at the top.
+        #expect(WirelessReconnector.next(after: "192.168.1.1:36947", in: targets) == targets[0])
+    }
 
     @Test("an open port is reachable, a closed one is not")
     func reach() throws {

@@ -42,3 +42,25 @@ public nonisolated struct ActivityEvent: Identifiable, Sendable, Equatable {
 
     public var isError: Bool { kind == .error }
 }
+
+/// Something Conduit itself must tell the person now — not a phone's
+/// notification, and not only a line in Activity.
+public nonisolated struct ConduitAlert: Identifiable, Sendable, Equatable {
+    public enum Action: Sendable, Equatable {
+        case none
+        /// Clicking it opens this Mac's Wi-Fi settings.
+        case openWiFiSettings
+    }
+
+    public let id: UUID
+    public let title: String
+    public let body: String
+    public let action: Action
+
+    public init(id: UUID = UUID(), title: String, body: String, action: Action = .none) {
+        self.id = id
+        self.title = title
+        self.body = body
+        self.action = action
+    }
+}
